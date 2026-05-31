@@ -2,19 +2,19 @@ name: Renovate Vulnerability Report
 description: Report vulnerabilities in Renovate pull request image updates
 inputs:
   report-surface:
-    description: Report surface to publish to: summary or pr-comment
+    description: "Report surface to publish to: summary or pr-comment"
     required: false
     default: summary
   forge:
-    description: Forge hosting the pull request: github, forgejo, or gitea
+    description: "Forge hosting the pull request: github, forgejo, or gitea"
     required: false
     default: github
   forge-api-url:
-    description: Forge API URL, usually ${{ github.api_url }}
+    description: "Forge API URL, usually ${{ github.api_url }}"
     required: false
     default: ${{ github.api_url }}
   token:
-    description: Forge token used when report-surface is pr-comment
+    description: "Forge token used when report-surface is pr-comment"
     required: false
     default: ${{ github.token }}
 runs:
