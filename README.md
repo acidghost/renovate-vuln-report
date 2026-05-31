@@ -38,7 +38,34 @@ jobs:
       - uses: acidghost/renovate-vuln-report@main
 ```
 
-The action writes an Image Update Vulnerability Report to the GitHub Actions Step Summary.
+By default, the action writes an Image Update Vulnerability Report to the actions Step Summary.
+
+### Pull request comments for Forgejo/Gitea
+
+Forgejo and Gitea may expose `GITHUB_STEP_SUMMARY` only in job output, not in the pull request UI. Use `report-surface: pr-comment` to publish a Managed Pull Request Comment instead:
+
+```yaml
+permissions:
+  contents: read
+  issues: write
+
+steps:
+  - uses: actions/setup-python@v6
+    with:
+      python-version: '3.14'
+  - name: Install Grype
+    run: |
+      curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+        | sh -s -- -b /usr/local/bin
+  - uses: acidghost/renovate-vuln-report@main
+    with:
+      report-surface: pr-comment
+      forge: forgejo # or gitea / github
+      forge-api-url: ${{ github.api_url }}
+      token: ${{ github.token }}
+```
+
+Comment mode uses regular issue comments on the pull request conversation and updates one managed comment identified by a hidden marker. The token must be able to list, create, and update pull request comments. Summary mode does not require write permissions.
 
 ## Required Renovate configuration
 
@@ -72,10 +99,22 @@ After installing the package, run:
 renovate-vuln-report
 ```
 
-The CLI expects GitHub Actions environment variables:
+The CLI expects actions environment variables:
 
 - `GITHUB_EVENT_NAME` must be `pull_request`
 - `GITHUB_EVENT_PATH` must point to the pull request event payload
-- `GITHUB_STEP_SUMMARY`, when set, receives the markdown report
+- `GITHUB_STEP_SUMMARY`, when summary mode is used, receives the markdown report
+
+Options:
+
+- `--report-surface summary|pr-comment` defaults to `summary`
+- `--forge github|forgejo|gitea` defaults to `github`
+- `--forge-api-url URL` defaults to `GITHUB_API_URL`, then `https://api.github.com`
+
+Environment variables:
+
+- `RENOVATE_VULN_REPORT_SURFACE` can set the default report surface
+- `RENOVATE_VULN_REPORT_FORGE` can set the default forge
+- `FORGE_TOKEN` is required when `--report-surface pr-comment` is used
 
 `grype` must already be installed and available on `PATH`. Registry credentials, when needed, must be prepared before running the CLI.

@@ -13,7 +13,7 @@ Included:
 - Build Scan Targets from New Image Revisions only.
 - Run Grype directly against registry image references.
 - Consume Grype JSON output.
-- Publish an Image Update Vulnerability Report to the GitHub Actions Step Summary.
+- Publish an Image Update Vulnerability Report to a selected Report Surface.
 - Expose a minimal user-facing CLI named `renovate-vuln-report`.
 - Package the GitHub Action as a composite action that invokes the CLI.
 
@@ -22,7 +22,7 @@ Out of scope:
 - Vulnerability Diff between Current Image Revision and New Image Revision.
 - PURL scanning.
 - SBOM generation, scanning, storage, or diffing.
-- PR comments, check annotations, or persistent report updates.
+- Check annotations.
 - Policy enforcement such as failing on severity, KEV, or EPSS thresholds.
 - Installing Grype.
 - Managing registry credentials.
@@ -73,7 +73,7 @@ Deduplicate Vulnerability Scans by exact normalized Scan Target identity. The Gr
 
 ## Report shape
 
-The Step Summary should group findings by Scan Target, nested under or clearly associated with the relevant Image Update Entry.
+The Vulnerability Report should group findings by Scan Target, nested under or clearly associated with the relevant Image Update Entry.
 
 For each Scan Target, show:
 
@@ -99,9 +99,9 @@ Sort findings within each Scan Target by:
 3. severity: Critical, High, Medium, Low, Negligible, Unknown
 4. vulnerability ID as a stable tie-breaker
 
-The Step Summary should include a Skipped Update Entry section listing Unsupported Update Entries and skip reasons.
+The Vulnerability Report should include a Skipped Update Entry section listing Unsupported Update Entries and skip reasons.
 
-For failed Vulnerability Scans, include a sanitized failure reason and the Scan Target identity in the Step Summary. Put fuller diagnostics in the action log, not the summary.
+For failed Vulnerability Scans, include a sanitized failure reason and the Scan Target identity in the report. Put fuller diagnostics in the action log, not the report.
 
 ## Success and failure behavior
 
@@ -109,9 +109,9 @@ For failed Vulnerability Scans, include a sanitized failure reason and the Scan 
 - Pull request body unavailable: fail.
 - No Renovate Metadata Notes: fail.
 - Any Renovate Metadata Note malformed: fail.
-- Metadata notes valid, but zero supported Scan Targets: succeed with a Step Summary.
+- Metadata notes valid, but zero supported Scan Targets: succeed with a Vulnerability Report.
 - Some Unsupported Update Entries: succeed if all supported Scan Targets scan successfully.
-- Any supported Vulnerability Scan fails: fail after writing a partial Step Summary.
+- Any supported Vulnerability Scan fails: fail after writing a partial Vulnerability Report to the selected Report Surface.
 - Vulnerabilities found: succeed by default.
 - No vulnerabilities found: succeed.
 
@@ -124,7 +124,22 @@ Implement the first cut test-first, starting with unit tests for:
 3. Image Revision construction.
 4. Success and failure behavior.
 5. Grype JSON mapping into Vulnerability Findings.
-6. Step Summary rendering.
+6. Vulnerability Report rendering.
+
+## Report Surfaces
+
+The default Report Surface is `summary`, which writes the rendered report to the actions Step Summary.
+
+`pr-comment` publishes the rendered report as a Managed Pull Request Comment. It supports GitHub, Forgejo, and Gitea through the forge issue comments API, using the repository and pull request number from the pull request event payload. The comment is identified by `<!-- renovate-vuln-report:managed-comment:v1 -->` and is updated on later runs instead of duplicated.
+
+Action inputs and CLI options:
+
+- `report-surface`: `summary` or `pr-comment`, default `summary`.
+- `forge`: `github`, `forgejo`, or `gitea`, default `github`.
+- `forge-api-url`: defaults to `${{ github.api_url }}` in the composite action.
+- `token`: passed as `FORGE_TOKEN` and required only for `pr-comment`.
+
+If publishing to the selected Report Surface fails, the action fails.
 
 ## Packaging
 
@@ -150,6 +165,7 @@ The preset emits the required Renovate Metadata Note through `prBodyNotes`.
 The README should include:
 
 - Example workflow using the composite action.
+- Summary and pull request comment Report Surface examples.
 - A prior step that installs Grype.
 - A prior step for registry login when private images are scanned.
 - Required Renovate Metadata Preset usage and inline `prBodyNotes` configuration.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import binascii
 import json
@@ -7,11 +8,14 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 METADATA_NOTE_PATTERN = re.compile(r"<!--\s*renovate:metadata=([^\s]+)\s*-->")
+MANAGED_COMMENT_MARKER = "<!-- renovate-vuln-report:managed-comment:v1 -->"
 SEVERITY_ORDER = {
     "critical": 0,
     "high": 1,
@@ -45,6 +49,23 @@ class ScanFailure(RenovateVulnReportError):
         super().__init__(public_reason)
         self.public_reason = public_reason
         self.detail = detail or public_reason
+
+
+class ForgePublishError(RenovateVulnReportError):
+    """Raised when the selected Forge report surface cannot be published."""
+
+
+@dataclass(frozen=True)
+class PullRequestContext:
+    body: str
+    repository: str
+    number: int
+
+
+@dataclass(frozen=True)
+class ForgeComment:
+    id: int
+    body: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +128,20 @@ class ScanOutcome:
 
 class Scanner(Protocol):
     def scan(self, scan_target: str) -> ScanOutcome: ...
+
+
+class ForgeCommentClient(Protocol):
+    def list_issue_comments(
+        self, repository: str, issue_number: int
+    ) -> tuple[ForgeComment, ...]: ...
+
+    def create_issue_comment(
+        self, repository: str, issue_number: int, body: str
+    ) -> None: ...
+
+    def update_issue_comment(
+        self, repository: str, comment_id: int, body: str
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -254,6 +289,90 @@ def findings_from_grype_json(document: dict[str, Any]) -> tuple[Finding, ...]:
     return tuple(findings)
 
 
+class HttpForgeCommentClient:
+    def __init__(self, *, forge: str, api_url: str, token: str) -> None:
+        self.forge = forge
+        self.api_url = api_url.rstrip("/")
+        self.token = token
+
+    def list_issue_comments(
+        self, repository: str, issue_number: int
+    ) -> tuple[ForgeComment, ...]:
+        data = self._request_json(
+            "GET",
+            f"/repos/{repository}/issues/{issue_number}/comments?per_page=100&limit=100",
+        )
+        if not isinstance(data, list):
+            raise ForgePublishError("Forge returned an unexpected comments response")
+
+        comments: list[ForgeComment] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            comment_id = item.get("id")
+            body = item.get("body")
+            if isinstance(comment_id, int) and isinstance(body, str):
+                comments.append(ForgeComment(id=comment_id, body=body))
+        return tuple(comments)
+
+    def create_issue_comment(
+        self, repository: str, issue_number: int, body: str
+    ) -> None:
+        self._request_json(
+            "POST",
+            f"/repos/{repository}/issues/{issue_number}/comments",
+            body={"body": body},
+        )
+
+    def update_issue_comment(self, repository: str, comment_id: int, body: str) -> None:
+        self._request_json(
+            "PATCH",
+            f"/repos/{repository}/issues/comments/{comment_id}",
+            body={"body": body},
+        )
+
+    def _request_json(
+        self, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> Any:
+        request_body = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(
+            f"{self.api_url}{path}",
+            data=request_body,
+            method=method,
+            headers=self._headers(),
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                response_body = response.read()
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace")
+            raise ForgePublishError(
+                f"Forge API request failed with status {error.code}: {_first_non_empty_line(detail) or error.reason}"
+            ) from error
+        except urllib.error.URLError as error:
+            raise ForgePublishError(
+                f"Forge API request failed: {error.reason}"
+            ) from error
+
+        if not response_body:
+            return None
+        try:
+            return json.loads(response_body)
+        except json.JSONDecodeError as error:
+            raise ForgePublishError("Forge API returned invalid JSON") from error
+
+    def _headers(self) -> dict[str, str]:
+        authorization = (
+            f"Bearer {self.token}" if self.forge == "github" else f"token {self.token}"
+        )
+        return {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "renovate-vuln-report",
+            "Authorization": authorization,
+        }
+
+
 class GrypeScanner:
     def scan(self, scan_target: str) -> ScanOutcome:
         command = ["grype", "-o", "json", f"registry:{scan_target}"]
@@ -293,20 +412,35 @@ def run(
     event_path: Path,
     summary_path: Path | None,
     scanner: Scanner,
+    report_surface: str = "summary",
+    comment_client: ForgeCommentClient | None = None,
 ) -> int:
+    context: PullRequestContext | None = None
     try:
-        body = _pull_request_body(event_name=event_name, event_path=event_path)
-        entries = collect_update_entries(body)
+        context = _pull_request_context(event_name=event_name, event_path=event_path)
+        entries = collect_update_entries(context.body)
     except RenovateVulnReportError as error:
-        _write_summary(
-            summary_path, f"# Image Update Vulnerability Report\n\nFailed: {error}\n"
+        content = f"# Image Update Vulnerability Report\n\nFailed: {error}\n"
+        _publish_report(
+            report_surface=report_surface,
+            markdown=content,
+            summary_path=summary_path,
+            context=context,
+            comment_client=comment_client,
         )
         print(str(error), file=sys.stderr)
         return 1
 
     report = build_report(entries=entries, scanner=scanner)
-    _write_summary(summary_path, render_step_summary(report))
-    return 1 if report.failed else 0
+    markdown = render_step_summary(report)
+    publish_failed = _publish_report(
+        report_surface=report_surface,
+        markdown=markdown,
+        summary_path=summary_path,
+        context=context,
+        comment_client=comment_client,
+    )
+    return 1 if report.failed or publish_failed else 0
 
 
 def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Report:
@@ -361,6 +495,22 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
         skipped_entries=skipped_entries,
         failed=failed,
     )
+
+
+def publish_managed_pull_request_comment(
+    *,
+    comment_client: ForgeCommentClient,
+    repository: str,
+    issue_number: int,
+    markdown: str,
+) -> None:
+    body = f"{MANAGED_COMMENT_MARKER}\n{markdown}"
+    comments = comment_client.list_issue_comments(repository, issue_number)
+    for comment in comments:
+        if comment.body.startswith(MANAGED_COMMENT_MARKER):
+            comment_client.update_issue_comment(repository, comment.id, body)
+            return
+    comment_client.create_issue_comment(repository, issue_number, body)
 
 
 def render_step_summary(report: Report) -> str:
@@ -445,7 +595,66 @@ def sort_findings(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
     return tuple(sorted(findings, key=_finding_sort_key))
 
 
+def _publish_report(
+    *,
+    report_surface: str,
+    markdown: str,
+    summary_path: Path | None,
+    context: PullRequestContext | None,
+    comment_client: ForgeCommentClient | None,
+) -> bool:
+    if report_surface == "summary":
+        _write_summary(summary_path, markdown)
+        return False
+
+    if report_surface != "pr-comment":
+        print(f"unsupported report surface: {report_surface}", file=sys.stderr)
+        return True
+
+    if context is None:
+        print(
+            "cannot publish Pull Request Comment without pull request context",
+            file=sys.stderr,
+        )
+        return True
+    if comment_client is None:
+        print(
+            "cannot publish Pull Request Comment without a Forge client",
+            file=sys.stderr,
+        )
+        return True
+
+    try:
+        publish_managed_pull_request_comment(
+            comment_client=comment_client,
+            repository=context.repository,
+            issue_number=context.number,
+            markdown=markdown,
+        )
+    except ForgePublishError as error:
+        print(str(error), file=sys.stderr)
+        return True
+    return False
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--report-surface",
+        choices=("summary", "pr-comment"),
+        default=os.environ.get("RENOVATE_VULN_REPORT_SURFACE", "summary"),
+    )
+    parser.add_argument(
+        "--forge",
+        choices=("github", "forgejo", "gitea"),
+        default=os.environ.get("RENOVATE_VULN_REPORT_FORGE", "github"),
+    )
+    parser.add_argument(
+        "--forge-api-url",
+        default=os.environ.get("GITHUB_API_URL") or "https://api.github.com",
+    )
+    args = parser.parse_args()
+
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     event_path_value = os.environ.get("GITHUB_EVENT_PATH")
     summary_path_value = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -453,16 +662,31 @@ def main() -> None:
         print("GITHUB_EVENT_PATH is not set", file=sys.stderr)
         raise SystemExit(1)
 
+    comment_client = None
+    if args.report_surface == "pr-comment":
+        token = os.environ.get("FORGE_TOKEN")
+        if not token:
+            print(
+                "FORGE_TOKEN is required when report-surface is pr-comment",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        comment_client = HttpForgeCommentClient(
+            forge=args.forge, api_url=args.forge_api_url, token=token
+        )
+
     exit_code = run(
         event_name=event_name,
         event_path=Path(event_path_value),
         summary_path=Path(summary_path_value) if summary_path_value else None,
         scanner=GrypeScanner(),
+        report_surface=args.report_surface,
+        comment_client=comment_client,
     )
     raise SystemExit(exit_code)
 
 
-def _pull_request_body(*, event_name: str, event_path: Path) -> str:
+def _pull_request_context(*, event_name: str, event_path: Path) -> PullRequestContext:
     if event_name != "pull_request":
         raise PreconditionError(
             "renovate-vuln-report only supports pull_request events"
@@ -487,7 +711,24 @@ def _pull_request_body(*, event_name: str, event_path: Path) -> str:
     body = pull_request.get("body")
     if not isinstance(body, str):
         raise PreconditionError("pull request body is unavailable")
-    return body
+
+    number = pull_request.get("number")
+    if not isinstance(number, int):
+        raise PreconditionError("pull request number is unavailable")
+
+    repository = event.get("repository")
+    if not isinstance(repository, dict):
+        raise PreconditionError("repository information is unavailable")
+
+    repository_full_name = repository.get("full_name")
+    if not isinstance(repository_full_name, str):
+        raise PreconditionError("repository full name is unavailable")
+
+    return PullRequestContext(
+        body=body,
+        repository=repository_full_name,
+        number=number,
+    )
 
 
 def _optional_string(value: Any) -> str | None:

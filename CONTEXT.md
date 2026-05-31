@@ -82,16 +82,32 @@ A package within a **Scan Target** that a **Vulnerability Finding** applies to.
 _Avoid_: Dependency, component, artifact
 
 **Vulnerability Report**:
-A listing of vulnerabilities found for one or more scanned revisions. A Vulnerability Report does not imply comparison with a previous revision and may be partial when some Vulnerability Scans fail. For the first vertical cut, findings are grouped by **Scan Target** and published as a **Step Summary**.
+A listing of vulnerabilities found for one or more scanned revisions. A Vulnerability Report does not imply comparison with a previous revision and may be partial when some Vulnerability Scans fail. For the first vertical cut, findings are grouped by **Scan Target** and published to a **Report Surface**.
 _Avoid_: Diff, SBOM diff, vulnerability diff
+
+**Report Surface**:
+The place where a **Vulnerability Report** is published for reviewers. Supported Report Surfaces include **Step Summary** and **Pull Request Comment**.
+_Avoid_: Output, sink, destination
+
+**Forge**:
+The code hosting platform where the **Renovate PR** and its comments live. Supported Forges for first comment publishing are GitHub, Forgejo, and Gitea.
+_Avoid_: Git provider, SCM, server
 
 **Image Update Vulnerability Report**:
 A **Vulnerability Report** for **New Image Revisions** from **Image Update Entries** in a **Renovate PR**.
 _Avoid_: Container image vulnerability report, SBOM diff, image diff
 
 **Step Summary**:
-The GitHub Actions job summary used as the first report surface for the **Vulnerability Report**.
+The actions job summary used as the default **Report Surface** for the **Vulnerability Report**. On Forgejo and Gitea, a Step Summary may appear only in job output rather than the pull request UI.
 _Avoid_: PR comment, action log, check annotation
+
+**Pull Request Comment**:
+A comment on the Renovate PR in a **Forge**, used as a **Report Surface** when reviewers need the **Vulnerability Report** in the pull request UI.
+_Avoid_: Step Summary, action log, check annotation
+
+**Managed Pull Request Comment**:
+A **Pull Request Comment** owned by this action and identified by the hidden marker `<!-- renovate-vuln-report:managed-comment:v1 -->` so repeated runs update the same comment instead of creating duplicates.
+_Avoid_: New comment, comment spam, unmanaged comment
 
 **Vulnerability Diff**:
 A comparison of vulnerabilities between two revisions that identifies changes such as introduced, fixed, or unchanged vulnerabilities. A Vulnerability Diff is out of scope for the first vertical cut.
@@ -118,6 +134,8 @@ Domain expert: "No. Report successful scans, but treat the failed Vulnerability 
 Dev: "Should vulnerabilities fail the action?"
 Domain expert: "Not by default. Finding vulnerabilities is a successful Vulnerability Scan; the first cut reports findings without enforcing a policy."
 Dev: "Where should the first Vulnerability Report appear?"
-Domain expert: "In the GitHub Actions Step Summary. It avoids PR comment noise and does not require PR write permissions."
+Domain expert: "Publish it to a Report Surface. Step Summary is the default because it avoids PR comment noise and does not require PR write permissions, but Pull Request Comment is needed on platforms where Step Summary is not visible in the pull request UI."
+Dev: "Should every run create a new pull request comment?"
+Domain expert: "No. Use a Managed Pull Request Comment identified by a hidden marker and update it on later runs."
 Dev: "Which platform should the first scan use for multi-platform images?"
 Domain expert: "Do not specify a Scan Target Platform in the first cut. Let the scanner use its default, and consider a user-set Scan Target Platform later."
