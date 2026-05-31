@@ -142,15 +142,21 @@ def extract_metadata_payloads(pr_body: str) -> tuple[dict[str, Any], ...]:
         try:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
-            raise MetadataError(f"Renovate Metadata Note {index} is not valid base64") from error
+            raise MetadataError(
+                f"Renovate Metadata Note {index} is not valid base64"
+            ) from error
 
         try:
             payload = json.loads(decoded)
         except json.JSONDecodeError as error:
-            raise MetadataError(f"Renovate Metadata Note {index} does not contain JSON") from error
+            raise MetadataError(
+                f"Renovate Metadata Note {index} does not contain JSON"
+            ) from error
 
         if not isinstance(payload, dict):
-            raise MetadataError(f"Renovate Metadata Note {index} payload must be a JSON object")
+            raise MetadataError(
+                f"Renovate Metadata Note {index} payload must be a JSON object"
+            )
         payloads.append(payload)
     return tuple(payloads)
 
@@ -202,7 +208,9 @@ def interpret_payload(payload: dict[str, Any]) -> UpdateEntry:
     return ImageUpdateEntry(
         repository=repository,
         current_revision=current_revision,
-        new_revision=ImageRevision(repository=repository, tag=new_tag, digest=new_digest),
+        new_revision=ImageRevision(
+            repository=repository, tag=new_tag, digest=new_digest
+        ),
         dep_name=dep_name,
         manager=manager,
         update_type=_optional_string(payload.get("updateType")),
@@ -257,7 +265,9 @@ class GrypeScanner:
                 text=True,
             )
         except FileNotFoundError as error:
-            raise ScanFailure("grype is not installed or not available on PATH", str(error)) from error
+            raise ScanFailure(
+                "grype is not installed or not available on PATH", str(error)
+            ) from error
 
         if completed.returncode != 0:
             public_reason = _first_non_empty_line(completed.stderr) or (
@@ -268,7 +278,9 @@ class GrypeScanner:
         try:
             grype_json = json.loads(completed.stdout)
         except json.JSONDecodeError as error:
-            raise ScanFailure("grype did not return valid JSON", completed.stdout) from error
+            raise ScanFailure(
+                "grype did not return valid JSON", completed.stdout
+            ) from error
 
         if not isinstance(grype_json, dict):
             raise ScanFailure("grype JSON output was not an object", completed.stdout)
@@ -286,7 +298,9 @@ def run(
         body = _pull_request_body(event_name=event_name, event_path=event_path)
         entries = collect_update_entries(body)
     except RenovateVulnReportError as error:
-        _write_summary(summary_path, f"# Image Update Vulnerability Report\n\nFailed: {error}\n")
+        _write_summary(
+            summary_path, f"# Image Update Vulnerability Report\n\nFailed: {error}\n"
+        )
         print(str(error), file=sys.stderr)
         return 1
 
@@ -297,10 +311,14 @@ def run(
 
 def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Report:
     image_entries = [entry for entry in entries if isinstance(entry, ImageUpdateEntry)]
-    skipped_entries = tuple(entry for entry in entries if isinstance(entry, UnsupportedUpdateEntry))
+    skipped_entries = tuple(
+        entry for entry in entries if isinstance(entry, UnsupportedUpdateEntry)
+    )
     target_counts: dict[str, int] = {}
     for entry in image_entries:
-        target_counts[entry.new_revision.reference] = target_counts.get(entry.new_revision.reference, 0) + 1
+        target_counts[entry.new_revision.reference] = (
+            target_counts.get(entry.new_revision.reference, 0) + 1
+        )
 
     target_reports: list[TargetReport] = []
     failed = False
@@ -317,7 +335,9 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
                     failure_reason=error.public_reason,
                 )
             )
-        except Exception as error:  # pragma: no cover - defensive boundary around scanner plugins.
+        except (
+            Exception
+        ) as error:  # pragma: no cover - defensive boundary around scanner plugins.
             failed = True
             print(str(error), file=sys.stderr)
             target_reports.append(
@@ -336,7 +356,11 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
                 )
             )
 
-    return Report(target_reports=tuple(target_reports), skipped_entries=skipped_entries, failed=failed)
+    return Report(
+        target_reports=tuple(target_reports),
+        skipped_entries=skipped_entries,
+        failed=failed,
+    )
 
 
 def render_step_summary(report: Report) -> str:
@@ -348,10 +372,17 @@ def render_step_summary(report: Report) -> str:
     for target_report in report.target_reports:
         lines.extend([f"## `{_escape_inline_code(target_report.scan_target)}`", ""])
         if target_report.update_entry_count > 1:
-            lines.extend([f"Shared by {target_report.update_entry_count} Image Update Entries.", ""])
+            lines.extend(
+                [
+                    f"Shared by {target_report.update_entry_count} Image Update Entries.",
+                    "",
+                ]
+            )
 
         if target_report.failure_reason:
-            lines.extend([f"Vulnerability Scan failed: {target_report.failure_reason}", ""])
+            lines.extend(
+                [f"Vulnerability Scan failed: {target_report.failure_reason}", ""]
+            )
             continue
 
         findings = target_report.outcome.findings if target_report.outcome else ()
@@ -433,12 +464,16 @@ def main() -> None:
 
 def _pull_request_body(*, event_name: str, event_path: Path) -> str:
     if event_name != "pull_request":
-        raise PreconditionError("renovate-vuln-report only supports pull_request events")
+        raise PreconditionError(
+            "renovate-vuln-report only supports pull_request events"
+        )
 
     try:
         event = json.loads(event_path.read_text())
     except FileNotFoundError as error:
-        raise PreconditionError(f"GitHub event payload not found: {event_path}") from error
+        raise PreconditionError(
+            f"GitHub event payload not found: {event_path}"
+        ) from error
     except json.JSONDecodeError as error:
         raise PreconditionError("GitHub event payload is not valid JSON") from error
 
@@ -500,7 +535,9 @@ def _kev(vulnerability: dict[str, Any]) -> bool:
 
 
 def _finding_sort_key(finding: Finding) -> tuple[bool, bool, float, int, str]:
-    severity_rank = SEVERITY_ORDER.get(finding.severity.lower(), SEVERITY_ORDER["unknown"])
+    severity_rank = SEVERITY_ORDER.get(
+        finding.severity.lower(), SEVERITY_ORDER["unknown"]
+    )
     return (
         not finding.kev,
         finding.epss is None,
@@ -517,8 +554,12 @@ def _severity_counts_line(findings: tuple[Finding, ...]) -> str:
     for finding in findings:
         severity = finding.severity.capitalize()
         counts[severity] = counts.get(severity, 0) + 1
-    ordered = sorted(counts.items(), key=lambda item: SEVERITY_ORDER.get(item[0].lower(), 99))
-    return "Severity counts: " + ", ".join(f"{severity}: {count}" for severity, count in ordered)
+    ordered = sorted(
+        counts.items(), key=lambda item: SEVERITY_ORDER.get(item[0].lower(), 99)
+    )
+    return "Severity counts: " + ", ".join(
+        f"{severity}: {count}" for severity, count in ordered
+    )
 
 
 def _format_epss(epss: float | None) -> str:

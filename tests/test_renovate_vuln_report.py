@@ -136,7 +136,9 @@ def test_findings_from_grype_json_maps_package_fix_epss_and_kev() -> None:
     )
 
 
-def test_run_writes_step_summary_and_succeeds_when_vulnerabilities_are_found(tmp_path: Path) -> None:
+def test_run_writes_step_summary_and_succeeds_when_vulnerabilities_are_found(
+    tmp_path: Path,
+) -> None:
     event_path = tmp_path / "event.json"
     summary_path = tmp_path / "summary.md"
     event_path.write_text(json.dumps(pull_request_event(note(docker_payload()))))
@@ -176,12 +178,18 @@ def test_run_writes_step_summary_and_succeeds_when_vulnerabilities_are_found(tmp
     assert "0.91" in summary
 
 
-def test_run_deduplicates_scan_targets_but_reports_shared_target(tmp_path: Path) -> None:
+def test_run_deduplicates_scan_targets_but_reports_shared_target(
+    tmp_path: Path,
+) -> None:
     event_path = tmp_path / "event.json"
     summary_path = tmp_path / "summary.md"
-    body = "\n".join([note(docker_payload()), note(docker_payload(depName="ghcr.io/acme/app-copy"))])
+    body = "\n".join(
+        [note(docker_payload()), note(docker_payload(depName="ghcr.io/acme/app-copy"))]
+    )
     event_path.write_text(json.dumps(pull_request_event(body)))
-    scanner = FakeScanner({"ghcr.io/acme/app:1.1.0@sha256:bbb": ScanOutcome(findings=())})
+    scanner = FakeScanner(
+        {"ghcr.io/acme/app:1.1.0@sha256:bbb": ScanOutcome(findings=())}
+    )
 
     exit_code = run(
         event_name="pull_request",
@@ -195,13 +203,19 @@ def test_run_deduplicates_scan_targets_but_reports_shared_target(tmp_path: Path)
     assert "Shared by 2 Image Update Entries" in summary_path.read_text()
 
 
-def test_run_continues_and_fails_after_partial_report_when_a_scan_fails(tmp_path: Path) -> None:
+def test_run_continues_and_fails_after_partial_report_when_a_scan_fails(
+    tmp_path: Path,
+) -> None:
     event_path = tmp_path / "event.json"
     summary_path = tmp_path / "summary.md"
     body = "\n".join(
         [
             note(docker_payload(packageName="ghcr.io/acme/ok", newDigest="sha256:ok")),
-            note(docker_payload(packageName="ghcr.io/acme/private", newDigest="sha256:private")),
+            note(
+                docker_payload(
+                    packageName="ghcr.io/acme/private", newDigest="sha256:private"
+                )
+            ),
         ]
     )
     event_path.write_text(json.dumps(pull_request_event(body)))
