@@ -1,8 +1,8 @@
-# Renovate SBOM Diff
+# Renovate Vulnerability Report
 
 This context describes how Renovate dependency updates are interpreted so vulnerability information can be reported for the updated dependencies.
 
-The repository name is provisional and should not be treated as authoritative domain language. The user-facing command name is `renovate-vuln-report`.
+The repository and user-facing command are named `renovate-vuln-report`.
 
 ## Language
 

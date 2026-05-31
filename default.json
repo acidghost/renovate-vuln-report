@@ -1,0 +1,7 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Emit Renovate metadata notes for renovate-vuln-report.",
+  "prBodyNotes": [
+    "<!-- renovate:metadata={{{encodeBase64 (toJSON (toObject 'depName' depName 'packageName' packageName 'manager' manager 'datasource' datasource 'updateType' updateType 'currentValue' currentValue 'newValue' newValue 'currentDigest' currentDigest 'newDigest' newDigest))}}} -->"
+  ]
+}

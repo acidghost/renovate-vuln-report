@@ -27,7 +27,6 @@ Out of scope:
 - Installing Grype.
 - Managing registry credentials.
 - User-configurable Scan Target Platform.
-- Publishing a reusable Renovate Metadata Preset.
 - Supporting `pull_request_target` or PR body override inputs.
 
 ## Inputs and preconditions
@@ -134,6 +133,18 @@ Implement the first cut test-first, starting with unit tests for:
 - Expose the CLI command as `renovate-vuln-report`.
 - Create a composite GitHub Action named `Renovate Vulnerability Report` that invokes the CLI.
 
+## Renovate Metadata Preset
+
+Publish a repository-hosted default preset in `default.json` so users can configure Renovate with:
+
+```json
+{
+  "extends": ["github>acidghost/renovate-vuln-report"]
+}
+```
+
+The preset emits the required Renovate Metadata Note through `prBodyNotes`.
+
 ## Documentation
 
 The README should include:
@@ -141,5 +152,5 @@ The README should include:
 - Example workflow using the composite action.
 - A prior step that installs Grype.
 - A prior step for registry login when private images are scanned.
-- Required Renovate `prBodyNotes` configuration inline.
+- Required Renovate Metadata Preset usage and inline `prBodyNotes` configuration.
 - Clear statement that the first cut reports New Image Revision vulnerabilities only and does not produce a diff.

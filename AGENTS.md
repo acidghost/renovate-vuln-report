@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues are tracked in GitHub Issues for `acidghost/renovate-sbomdiff` using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues for `acidghost/renovate-vuln-report` using the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

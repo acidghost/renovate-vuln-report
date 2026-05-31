@@ -35,14 +35,24 @@ jobs:
       #     username: ${{ github.actor }}
       #     password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: acidghost/renovate-sbomdiff@main
+      - uses: acidghost/renovate-vuln-report@main
 ```
 
 The action writes an Image Update Vulnerability Report to the GitHub Actions Step Summary.
 
 ## Required Renovate configuration
 
-Configure Renovate to emit one machine-readable metadata note per update entry in the PR body:
+Configure Renovate to emit one machine-readable metadata note per update entry in the PR body.
+
+Recommended: extend this repository's Renovate Metadata Preset:
+
+```json
+{
+  "extends": ["github>acidghost/renovate-vuln-report"]
+}
+```
+
+Or copy the configuration inline:
 
 ```json
 {
