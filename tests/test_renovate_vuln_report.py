@@ -212,10 +212,43 @@ def test_run_writes_step_summary_and_succeeds_when_vulnerabilities_are_found(
     summary = summary_path.read_text()
     assert "# Image Update Vulnerability Report" in summary
     assert "ghcr.io/acme/app:1.1.0@sha256:bbb" in summary
-    assert "CVE-2024-0001" in summary
+    assert "[CVE-2024-0001](https://nvd.nist.gov/vuln/detail/CVE-2024-0001)" in summary
     assert "openssl" in summary
     assert "KEV" in summary
     assert "0.91" in summary
+
+
+def test_run_links_ghsa_vulnerability_findings(tmp_path: Path) -> None:
+    event_path = tmp_path / "event.json"
+    summary_path = tmp_path / "summary.md"
+    event_path.write_text(json.dumps(pull_request_event(note(docker_payload()))))
+    scanner = FakeScanner(
+        {
+            "ghcr.io/acme/app:1.1.0@sha256:bbb": ScanOutcome(
+                findings=(
+                    Finding(
+                        vulnerability_id="GHSA-p436-gjf2-799p",
+                        severity="High",
+                        package_name="openssl",
+                        installed_version="1.2.0",
+                    ),
+                )
+            )
+        }
+    )
+
+    exit_code = run(
+        event_name="pull_request",
+        event_path=event_path,
+        summary_path=summary_path,
+        scanner=scanner,
+    )
+
+    assert exit_code == 0
+    assert (
+        "[GHSA-p436-gjf2-799p](https://github.com/advisories/GHSA-p436-gjf2-799p)"
+        in summary_path.read_text()
+    )
 
 
 def test_run_deduplicates_scan_targets_but_reports_shared_target(

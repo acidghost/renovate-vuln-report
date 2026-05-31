@@ -557,7 +557,7 @@ def render_step_summary(report: Report) -> str:
                         "KEV" if finding.kev else "",
                         _format_epss(finding.epss),
                         _escape_table(finding.severity),
-                        _escape_table(finding.vulnerability_id),
+                        _vulnerability_link(finding.vulnerability_id),
                         _escape_table(finding.package_name),
                         _escape_table(finding.installed_version),
                         _escape_table(fixed),
@@ -807,6 +807,15 @@ def _format_epss(epss: float | None) -> str:
     if epss is None:
         return ""
     return f"{epss:.4g}"
+
+
+def _vulnerability_link(vulnerability_id: str) -> str:
+    escaped_id = _escape_table(vulnerability_id)
+    if vulnerability_id.startswith("CVE-"):
+        return f"[{escaped_id}](https://nvd.nist.gov/vuln/detail/{escaped_id})"
+    if vulnerability_id.startswith("GHSA-"):
+        return f"[{escaped_id}](https://github.com/advisories/{escaped_id})"
+    return escaped_id
 
 
 def _escape_table(value: str) -> str:
