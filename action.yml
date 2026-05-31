@@ -27,8 +27,8 @@ runs:
       shell: bash
       env:
         FORGE_TOKEN: ${{ inputs.token }}
+        RENOVATE_VULN_REPORT_SURFACE: ${{ inputs.report-surface }}
+        RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}
+        INPUTS_FORGE_API_URL: ${{ inputs.forge-api-url }}
       run: >-
-        renovate-vuln-report
-        --report-surface "${{ inputs.report-surface }}"
-        --forge "${{ inputs.forge }}"
-        --forge-api-url "${{ inputs.forge-api-url }}"
+        renovate-vuln-report --forge-api-url "${INPUTS_FORGE_API_URL}"
