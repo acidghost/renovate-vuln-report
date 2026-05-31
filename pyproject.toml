@@ -1,0 +1,24 @@
+[project]
+name = "renovate-vuln-report"
+version = "0.1.0"
+description = "Report vulnerabilities in Renovate pull request image updates"
+readme = "README.md"
+authors = [
+    { name = "acidghost", email = "acidghost@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.15.14",
+    "ty>=0.0.39",
+]
+
+[project.scripts]
+renovate-vuln-report = "renovate_vuln_report:main"
+
+[build-system]
+requires = ["uv_build>=0.11.17,<0.12.0"]
+build-backend = "uv_build"
