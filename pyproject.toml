@@ -17,7 +17,7 @@ dev = [
 ]
 
 [project.scripts]
-renovate-vuln-report = "renovate_vuln_report:main"
+renovate-vuln-report = "renovate_vuln_report.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]
