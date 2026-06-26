@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from renovate_vuln_report.errors import ScanFailure
+from renovate_vuln_report.errors import ScanFailure, UnsupportedScanTarget
 from renovate_vuln_report.model import (
     Finding,
     ImageUpdateEntry,
@@ -26,9 +26,9 @@ SEVERITY_ORDER = {
 
 def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Report:
     image_entries = [entry for entry in entries if isinstance(entry, ImageUpdateEntry)]
-    skipped_entries = tuple(
+    skipped_entries = [
         entry for entry in entries if isinstance(entry, UnsupportedUpdateEntry)
-    )
+    ]
     target_counts: dict[str, int] = {}
     for entry in image_entries:
         target_counts[entry.new_revision.reference] = (
@@ -40,6 +40,16 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
     for scan_target, update_entry_count in target_counts.items():
         try:
             outcome = scanner.scan(scan_target)
+        except UnsupportedScanTarget as error:
+            print(f"skipped {scan_target}: {error.public_reason}", file=sys.stderr)
+            skipped_entries.append(
+                UnsupportedUpdateEntry(
+                    reason=error.public_reason,
+                    package_name=scan_target,
+                    datasource="docker",
+                )
+            )
+            continue
         except ScanFailure as error:
             failed = True
             print(error.detail, file=sys.stderr)
@@ -73,7 +83,7 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
 
     return Report(
         target_reports=tuple(target_reports),
-        skipped_entries=skipped_entries,
+        skipped_entries=tuple(skipped_entries),
         failed=failed,
     )
 

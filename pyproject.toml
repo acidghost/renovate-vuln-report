@@ -7,7 +7,9 @@ authors = [
     { name = "acidghost", email = "acidghost@users.noreply.github.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "oras>=0.2.42",
+]
 
 [dependency-groups]
 dev = [
@@ -22,3 +24,6 @@ renovate-vuln-report = "renovate_vuln_report.cli:main"
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+exclude-newer = "1 week"

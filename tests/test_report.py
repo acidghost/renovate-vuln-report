@@ -6,6 +6,7 @@ from renovate_vuln_report import (
     ImageUpdateEntry,
     ScanFailure,
     ScanOutcome,
+    UnsupportedScanTarget,
     UnsupportedUpdateEntry,
     build_report,
     render_step_summary,
@@ -104,3 +105,41 @@ def test_render_step_summary_links_vulnerability_findings() -> None:
         "[GHSA-p436-gjf2-799p](https://github.com/advisories/GHSA-p436-gjf2-799p)"
         in render_step_summary(report)
     )
+
+
+def test_build_report_treats_non_image_scan_target_as_skipped() -> None:
+    scanner = FakeScanner(
+        {
+            "ghcr.io/acme/chart:1.1.0@sha256:helm": UnsupportedScanTarget(
+                public_reason=(
+                    "not a scannable container image: OCI artifact could not be "
+                    "cataloged (for example a Helm chart stored as OCI)"
+                ),
+                detail="oci-model: not an OCI model artifact",
+            ),
+            "ghcr.io/acme/app:1.1.0@sha256:bbb": ScanOutcome(findings=()),
+        }
+    )
+
+    report = build_report(
+        entries=(
+            image_entry("ghcr.io/acme/chart", "sha256:helm"),
+            image_entry("ghcr.io/acme/app"),
+        ),
+        scanner=scanner,
+    )
+
+    assert report.failed is False
+    assert [tr.scan_target for tr in report.target_reports] == [
+        "ghcr.io/acme/app:1.1.0@sha256:bbb"
+    ]
+    assert len(report.skipped_entries) == 1
+    skipped = report.skipped_entries[0]
+    assert skipped.package_name == "ghcr.io/acme/chart:1.1.0@sha256:helm"
+    assert skipped.datasource == "docker"
+    assert "not a scannable container image" in skipped.reason
+
+    summary = render_step_summary(report)
+    assert "Skipped Update Entries" in summary
+    assert "not a scannable container image" in summary
+    assert "Vulnerability Scan failed" not in summary

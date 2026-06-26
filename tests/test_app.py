@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from renovate_vuln_report import Finding, ScanOutcome, run
+from renovate_vuln_report import Finding, ScanOutcome, UnsupportedScanTarget, run
 
 from conftest import FailingCommentClient, FakeCommentClient, FakeScanner
 
@@ -195,3 +195,46 @@ def test_run_fails_preconditions_before_scanning(
         )
         == 1
     )
+
+
+def test_run_skips_non_image_scan_targets_without_failing(
+    tmp_path: Path,
+    note: Callable[[dict[str, object]], str],
+    docker_payload: Callable[..., dict[str, object]],
+    pull_request_event: Callable[[str], dict[str, object]],
+) -> None:
+    payload = docker_payload(
+        depName="ghcr.io/acme/librechat-chart",
+        packageName="ghcr.io/acme/librechat-chart",
+        newValue="2.0.7",
+        newDigest="sha256:helmchart",
+        currentValue="2.0.6",
+        currentDigest="sha256:0000",
+    )
+    event_path = tmp_path / "event.json"
+    summary_path = tmp_path / "summary.md"
+    event_path.write_text(json.dumps(pull_request_event(note(payload))))
+    scanner = FakeScanner(
+        {
+            "ghcr.io/acme/librechat-chart:2.0.7@sha256:helmchart": UnsupportedScanTarget(
+                public_reason=(
+                    "not a scannable container image: OCI artifact could not be "
+                    "cataloged (for example a Helm chart stored as OCI)"
+                ),
+                detail="oci-model: not an OCI model artifact",
+            )
+        }
+    )
+
+    exit_code = run(
+        event_name="pull_request",
+        event_path=event_path,
+        summary_path=summary_path,
+        scanner=scanner,
+    )
+
+    assert exit_code == 0
+    summary = summary_path.read_text()
+    assert "Skipped Update Entries" in summary
+    assert "not a scannable container image" in summary
+    assert "Vulnerability Scan failed" not in summary

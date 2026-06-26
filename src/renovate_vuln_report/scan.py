@@ -4,8 +4,14 @@ import json
 import subprocess
 from typing import Any, Protocol
 
-from renovate_vuln_report.errors import ScanFailure
+from renovate_vuln_report.errors import ScanFailure, UnsupportedScanTarget
 from renovate_vuln_report.model import Finding, ScanOutcome
+from renovate_vuln_report.oci import (
+    Classification,
+    ManifestFetcher,
+    classify_manifest,
+    make_default_manifest_fetcher,
+)
 
 
 class Scanner(Protocol):
@@ -13,7 +19,19 @@ class Scanner(Protocol):
 
 
 class GrypeScanner:
+    def __init__(self, manifest_fetcher: ManifestFetcher | None = None) -> None:
+        # When None, the production fetcher is built lazily on first scan so
+        # tests can inject a double and avoid network access.
+        self._manifest_fetcher = manifest_fetcher
+
     def scan(self, scan_target: str) -> ScanOutcome:
+        classification = self._classify(scan_target)
+        if classification.skip_reason is not None:
+            raise UnsupportedScanTarget(
+                public_reason=classification.skip_reason,
+                detail=f"OCI manifest classified as {classification.kind}",
+            )
+
         command = ["grype", "-o", "json", f"registry:{scan_target}"]
         try:
             completed = subprocess.run(
@@ -43,6 +61,16 @@ class GrypeScanner:
         if not isinstance(grype_json, dict):
             raise ScanFailure("grype JSON output was not an object", completed.stdout)
         return ScanOutcome(findings=findings_from_grype_json(grype_json))
+
+    def _classify(self, scan_target: str) -> Classification:
+        fetcher = self._manifest_fetcher or make_default_manifest_fetcher()
+        self._manifest_fetcher = fetcher
+        manifest = fetcher.fetch(scan_target)
+        if manifest is None:
+            # Could not fetch a manifest: we cannot classify reliably, so fall
+            # through to a normal scan rather than guessing.
+            return Classification(kind="unknown", skip_reason=None)
+        return classify_manifest(manifest)
 
 
 def findings_from_grype_json(document: dict[str, Any]) -> tuple[Finding, ...]:
