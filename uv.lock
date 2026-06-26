@@ -204,13 +204,13 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "oras", specifier = ">=0.2.42" }]
+requires-dist = [{ name = "oras", specifier = "==0.2.42" }]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "ruff", specifier = ">=0.15.14" },
-    { name = "ty", specifier = ">=0.0.39" },
+    { name = "pytest", specifier = "==9.0.3" },
+    { name = "ruff", specifier = "==0.15.14" },
+    { name = "ty", specifier = "==0.0.39" },
 ]
 
 [[package]]
