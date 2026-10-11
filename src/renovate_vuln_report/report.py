@@ -60,9 +60,8 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
                     failure_reason=error.public_reason,
                 )
             )
-        except (
-            Exception
-        ) as error:  # pragma: no cover - defensive boundary around scanner plugins.
+        except Exception as error:  # noqa: BLE001 - defensive boundary around scanner plugins.
+            # pragma: no cover
             failed = True
             print(str(error), file=sys.stderr)
             target_reports.append(

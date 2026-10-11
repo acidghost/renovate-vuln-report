@@ -4,9 +4,9 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from renovate_vuln_report import Finding, ScanOutcome, UnsupportedScanTarget, run
-
 from conftest import FailingCommentClient, FakeCommentClient, FakeScanner
+
+from renovate_vuln_report import Finding, ScanOutcome, UnsupportedScanTarget, run
 
 
 def test_run_writes_step_summary_and_succeeds_when_vulnerabilities_are_found(

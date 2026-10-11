@@ -107,7 +107,7 @@ class ManifestFetcherStub:
     def __init__(self, manifest: dict[str, Any] | None) -> None:
         self._manifest = manifest
 
-    def fetch(self, reference: str) -> dict[str, Any] | None:  # noqa: ARG002
+    def fetch(self, reference: str) -> dict[str, Any] | None:
         return self._manifest
 
 
@@ -247,7 +247,7 @@ def test_oras_manifest_fetcher_is_bounded_by_timeout(
             pass
 
         def get_manifest(self, reference: str) -> dict[str, Any]:
-            time.sleep(2.0)  # noqa: ARG002 -- simulates a hung registry
+            time.sleep(2.0)
             return HELM_CHART_MANIFEST
 
     monkeypatch.setattr("oras.provider.Registry", _SlowRegistry)

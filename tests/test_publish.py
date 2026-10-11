@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from conftest import FailingCommentClient, FakeCommentClient
+
 from renovate_vuln_report import (
     ForgeComment,
     PullRequestContext,
     publish_managed_pull_request_comment,
     publish_report,
 )
-
-from conftest import FailingCommentClient, FakeCommentClient
 
 
 def test_publish_managed_pull_request_comment_creates_comment() -> None:

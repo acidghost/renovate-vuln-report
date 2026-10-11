@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from conftest import FakeScanner
+
 from renovate_vuln_report import (
     Finding,
     ImageRevision,
@@ -11,8 +13,6 @@ from renovate_vuln_report import (
     build_report,
     render_step_summary,
 )
-
-from conftest import FakeScanner
 
 
 def image_entry(repository: str, digest: str = "sha256:bbb") -> ImageUpdateEntry:
