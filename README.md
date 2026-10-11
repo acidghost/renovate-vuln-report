@@ -48,6 +48,22 @@ To use `uv` already available on `PATH` (for example, on a self-hosted runner or
 
 Bring a compatible `uv` version. Disabling setup does not disable locked dependency installation.
 
+### Grype database cache
+
+By default, the action caches the Grype vulnerability database using `actions/cache`. Cache keys include the runner OS, architecture, Grype version, and UTC date. The first run each day restores the previous snapshot if available, checks for a database update, and saves today's snapshot. Subsequent cache hits reuse it without checking for updates during scans. Update failures fail the action rather than silently using an older snapshot.
+
+The refreshed database is saved before scanning, so a failed scan does not discard it. GitHub's cache scope and eviction rules apply: separate pull requests or concurrent cache misses may each need to refresh it. No scheduled job is required; refresh happens on the first run of the day.
+
+To disable caching (for example, on Forgejo/Gitea runners without a compatible cache service, or when using a custom database), set:
+
+```yaml
+- uses: acidghost/renovate-vuln-report@main
+  with:
+    cache-grype-db: 'false'
+```
+
+With caching disabled, Grype uses its normal database location and update behavior, including any `GRYPE_DB_*` environment overrides. The CLI is unchanged.
+
 ### Pull request comments for Forgejo/Gitea
 
 Forgejo and Gitea may expose `GITHUB_STEP_SUMMARY` only in job output, not in the pull request UI. Use `report-surface: pr-comment` to publish a Managed Pull Request Comment instead:

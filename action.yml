@@ -5,6 +5,10 @@ inputs:
     description: "Install uv; set to false to use uv already available on PATH"
     required: false
     default: "true"
+  cache-grype-db:
+    description: "Cache the Grype vulnerability database and refresh it once per UTC day"
+    required: false
+    default: "true"
   grype-check-for-app-update:
     description: "Enable Grype's startup version-check request to Anchore (does not control vulnerability database updates)"
     required: false
@@ -35,14 +39,57 @@ runs:
         version: "0.12.23"
         working-directory: ${{ github.action_path }}
         enable-cache: "false"
+
+    - name: Prepare Grype database cache key
+      if: ${{ inputs.cache-grype-db == 'true' }}
+      id: grype-db-cache-key
+      shell: bash
+      env:
+        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
+      run: |
+        version=$(grype version | awk '$1 == "Version:" {print $2}')
+        test -n "$version"
+        prefix="renovate-vuln-report-grype-db-v1-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Grype database
+      if: ${{ inputs.cache-grype-db == 'true' }}
+      id: grype-db-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/renovate-vuln-report-grype-db
+        key: ${{ steps.grype-db-cache-key.outputs.key }}
+        restore-keys: ${{ steps.grype-db-cache-key.outputs.prefix }}
+
+    - name: Refresh Grype database
+      if: ${{ inputs.cache-grype-db == 'true' && steps.grype-db-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
+        GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/renovate-vuln-report-grype-db
+      run: grype db update
+
+    - name: Save Grype database
+      if: ${{ inputs.cache-grype-db == 'true' && steps.grype-db-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/renovate-vuln-report-grype-db
+        key: ${{ steps.grype-db-cache-key.outputs.key }}
+
     - name: Generate Renovate vulnerability report
       shell: bash
       env:
+        INPUTS_CACHE_GRYPE_DB: ${{ inputs.cache-grype-db }}
+        INPUTS_FORGE_API_URL: ${{ inputs.forge-api-url }}
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
         FORGE_TOKEN: ${{ inputs.token }}
         RENOVATE_VULN_REPORT_SURFACE: ${{ inputs.report-surface }}
         RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}
-        INPUTS_FORGE_API_URL: ${{ inputs.forge-api-url }}
-      run: >-
-        uv run --locked --no-dev --isolated --project "$GITHUB_ACTION_PATH"
+      run: |
+        if [[ "$INPUTS_CACHE_GRYPE_DB" == "true" ]]; then
+          export GRYPE_DB_CACHE_DIR="$RUNNER_TEMP/renovate-vuln-report-grype-db"
+          export GRYPE_DB_AUTO_UPDATE=false
+        fi
+        uv run --locked --no-dev --isolated --project "$GITHUB_ACTION_PATH" \
           renovate-vuln-report --forge-api-url "${INPUTS_FORGE_API_URL}"
