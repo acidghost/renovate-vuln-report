@@ -1,6 +1,10 @@
 name: Renovate Vulnerability Report
 description: Report vulnerabilities in Renovate pull request image updates
 inputs:
+  grype-check-for-app-update:
+    description: "Enable Grype's startup version-check request to Anchore (does not control vulnerability database updates)"
+    required: false
+    default: 'false'
   report-surface:
     description: "Report surface to publish to: summary or pr-comment"
     required: false
@@ -26,6 +30,7 @@ runs:
     - name: Generate Renovate vulnerability report
       shell: bash
       env:
+        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
         FORGE_TOKEN: ${{ inputs.token }}
         RENOVATE_VULN_REPORT_SURFACE: ${{ inputs.report-surface }}
         RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}

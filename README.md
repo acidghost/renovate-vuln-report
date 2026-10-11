@@ -116,5 +116,6 @@ Environment variables:
 - `RENOVATE_VULN_REPORT_SURFACE` can set the default report surface
 - `RENOVATE_VULN_REPORT_FORGE` can set the default forge
 - `FORGE_TOKEN` is required when `--report-surface pr-comment` is used
+- `GRYPE_CHECK_FOR_APP_UPDATE` defaults to `false` for Grype subprocesses; set it to `true` to enable Grype's startup version check when using the CLI.
 
 `grype` must already be installed and available on `PATH`. Registry credentials, when needed, must be prepared before running the CLI.

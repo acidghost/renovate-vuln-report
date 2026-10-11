@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from typing import Any, Protocol
 
@@ -33,12 +34,15 @@ class GrypeScanner:
             )
 
         command = ["grype", "-o", "json", f"registry:{scan_target}"]
+        env = os.environ.copy()
+        env.setdefault("GRYPE_CHECK_FOR_APP_UPDATE", "false")
         try:
             completed = subprocess.run(
                 command,
                 check=False,
                 capture_output=True,
                 text=True,
+                env=env,
             )
         except FileNotFoundError as error:
             raise ScanFailure(
