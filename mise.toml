@@ -1,0 +1,10 @@
+[settings]
+minimum_release_age = "7d"
+lockfile = true
+pin = true
+
+[tools]
+jactionlint = "2.0.2"
+shellcheck = "0.11.0"
+uv = "0.12.23"
+zizmor = "1.30.1"
