@@ -19,10 +19,6 @@ jobs:
   renovate-vuln-report:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.14'
-
       - name: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
@@ -40,6 +36,18 @@ jobs:
 
 By default, the action writes an Image Update Vulnerability Report to the actions Step Summary.
 
+The action installs a pinned version of `uv` using `astral-sh/setup-uv` and runs with its own `uv.lock` (`--locked --no-dev`) in an isolated environment. It does not install into your project's environment. Python is downloaded by `uv` if needed; Grype must still be installed separately.
+
+To use `uv` already available on `PATH` (for example, on a self-hosted runner or installed by an earlier step), disable setup:
+
+```yaml
+- uses: acidghost/renovate-vuln-report@main
+  with:
+    setup-uv: 'false'
+```
+
+Bring a compatible `uv` version. Disabling setup does not disable locked dependency installation.
+
 ### Pull request comments for Forgejo/Gitea
 
 Forgejo and Gitea may expose `GITHUB_STEP_SUMMARY` only in job output, not in the pull request UI. Use `report-surface: pr-comment` to publish a Managed Pull Request Comment instead:
@@ -50,9 +58,6 @@ permissions:
   issues: write
 
 steps:
-  - uses: actions/setup-python@v6
-    with:
-      python-version: '3.14'
   - name: Install Grype
     run: |
       curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \

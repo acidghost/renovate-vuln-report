@@ -1,10 +1,14 @@
 name: Renovate Vulnerability Report
 description: Report vulnerabilities in Renovate pull request image updates
 inputs:
+  setup-uv:
+    description: "Install uv; set to false to use uv already available on PATH"
+    required: false
+    default: "true"
   grype-check-for-app-update:
     description: "Enable Grype's startup version-check request to Anchore (does not control vulnerability database updates)"
     required: false
-    default: 'false'
+    default: "false"
   report-surface:
     description: "Report surface to publish to: summary or pr-comment"
     required: false
@@ -24,9 +28,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install renovate-vuln-report
-      shell: bash
-      run: python -m pip install "$GITHUB_ACTION_PATH"
+    - name: Set up uv
+      if: ${{ inputs.setup-uv == 'true' }}
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        version: "0.12.23"
+        working-directory: ${{ github.action_path }}
+        enable-cache: "false"
     - name: Generate Renovate vulnerability report
       shell: bash
       env:
@@ -36,4 +44,5 @@ runs:
         RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}
         INPUTS_FORGE_API_URL: ${{ inputs.forge-api-url }}
       run: >-
-        renovate-vuln-report --forge-api-url "${INPUTS_FORGE_API_URL}"
+        uv run --locked --no-dev --isolated --project "$GITHUB_ACTION_PATH"
+          renovate-vuln-report --forge-api-url "${INPUTS_FORGE_API_URL}"
