@@ -154,7 +154,7 @@ class NullManifestFetcher:
     classification.
     """
 
-    def fetch(self, reference: str) -> dict[str, Any] | None:  # noqa: ARG002
+    def fetch(self, reference: str) -> dict[str, Any] | None:
         return None
 
 
@@ -187,7 +187,7 @@ def _fetch_manifest_bounded(
         try:
             registry = oras.provider.Registry()
             outcome = registry.get_manifest(reference)
-        except Exception:
+        except Exception:  # noqa: BLE001 - oras raises unrelated types; fall back to the scanner.
             # Network, auth, not-found, malformed manifest, or an oras bug:
             # we cannot classify reliably, so fall back to the scanner.
             outcome = None
