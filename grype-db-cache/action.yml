@@ -1,0 +1,54 @@
+name: Grype Database Cache Warmup
+description: Warm the shared Grype database cache from the consumer repository's default branch
+inputs:
+  grype-check-for-app-update:
+    description: "Enable Grype's startup version-check request to Anchore (does not control vulnerability database updates)"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Require a default-branch non-PR run
+      shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        if [[ -z "$DEFAULT_BRANCH" || "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" || "$GITHUB_EVENT_NAME" == pull_request* ]]; then
+          echo "Grype database warmup must run on the consumer repository's default branch, outside a PR." >&2
+          exit 1
+        fi
+
+    - name: Prepare Grype database cache key
+      id: grype-db-cache-key
+      shell: bash
+      env:
+        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
+      run: |
+        version=$(grype version | awk '$1 == "Version:" {print $2}')
+        test -n "$version"
+        prefix="renovate-vuln-report-grype-db-v2-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Grype database
+      id: grype-db-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/renovate-vuln-report-grype-db
+        key: ${{ steps.grype-db-cache-key.outputs.key }}
+        restore-keys: ${{ steps.grype-db-cache-key.outputs.prefix }}
+
+    - name: Refresh Grype database
+      if: ${{ steps.grype-db-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
+        GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/renovate-vuln-report-grype-db
+      run: grype db update
+
+    - name: Save Grype database
+      if: ${{ steps.grype-db-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/renovate-vuln-report-grype-db
+        key: ${{ steps.grype-db-cache-key.outputs.key }}

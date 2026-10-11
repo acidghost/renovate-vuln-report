@@ -16,6 +16,7 @@ falls through to a normal scan.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -140,8 +141,14 @@ def _has_layer(manifest: dict[str, Any], media_type: str) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class FetchedManifest:
+    document: dict[str, Any]
+    digest: str | None = None
+
+
 class ManifestFetcher(Protocol):
-    def fetch(self, reference: str) -> dict[str, Any] | None:
+    def fetch(self, reference: str) -> FetchedManifest | None:
         """Return the OCI manifest for ``reference`` or ``None`` if it cannot
         be fetched. Returning ``None`` triggers the scanner fallback."""
         ...
@@ -154,7 +161,7 @@ class NullManifestFetcher:
     classification.
     """
 
-    def fetch(self, reference: str) -> dict[str, Any] | None:
+    def fetch(self, reference: str) -> FetchedManifest | None:
         return None
 
 
@@ -171,22 +178,41 @@ class OrasManifestFetcher:
     def __init__(self, timeout_seconds: float = 15.0) -> None:
         self._timeout_seconds = timeout_seconds
 
-    def fetch(self, reference: str) -> dict[str, Any] | None:
+    def fetch(self, reference: str) -> FetchedManifest | None:
         return _fetch_manifest_bounded(reference, self._timeout_seconds)
 
 
 def _fetch_manifest_bounded(
     reference: str, timeout_seconds: float
-) -> dict[str, Any] | None:
-    import oras.provider  # local import keeps the pure classifier dependency-free
+) -> FetchedManifest | None:
+    # local imports keep the pure classifier dependency-free
+    import oras.defaults
+    import oras.provider
 
-    outcome: dict[str, Any] | None = None
+    outcome: FetchedManifest | None = None
 
     def _work() -> None:
         nonlocal outcome
         try:
             registry = oras.provider.Registry()
-            outcome = registry.get_manifest(reference)
+            container = registry.get_container(reference)
+            registry.auth.load_configs(container)
+            response = registry.do_request(
+                f"{registry.prefix}://{container.manifest_url()}",
+                "GET",
+                headers={
+                    "Accept": ", ".join(
+                        oras.defaults.default_manifest_accepted_media_types
+                    )
+                },
+            )
+            response.raise_for_status()
+            document = response.json()
+            if isinstance(document, dict):
+                # The digest covers the original manifest bytes, not
+                # re-serialized JSON (which may change whitespace/key ordering).
+                digest = "sha256:" + hashlib.sha256(response.content).hexdigest()
+                outcome = FetchedManifest(document=document, digest=digest)
         except Exception:  # noqa: BLE001 - oras raises unrelated types; fall back to the scanner.
             # Network, auth, not-found, malformed manifest, or an oras bug:
             # we cannot classify reliably, so fall back to the scanner.
@@ -207,4 +233,4 @@ def make_default_manifest_fetcher() -> ManifestFetcher:
 
 
 # Kept as a Callable type alias for callers that inject simple functions.
-ManifestFetcherFn = Callable[[str], "dict[str, Any] | None"]
+ManifestFetcherFn = Callable[[str], "FetchedManifest | None"]

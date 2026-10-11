@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from typing import Any
 
 import pytest
+import requests
 
 from renovate_vuln_report import (
     Finding,
@@ -12,7 +15,7 @@ from renovate_vuln_report import (
     UnsupportedScanTarget,
     findings_from_grype_json,
 )
-from renovate_vuln_report.oci import OrasManifestFetcher
+from renovate_vuln_report.oci import FetchedManifest, OrasManifestFetcher
 from renovate_vuln_report.scan import GrypeScanner
 
 
@@ -107,8 +110,8 @@ class ManifestFetcherStub:
     def __init__(self, manifest: dict[str, Any] | None) -> None:
         self._manifest = manifest
 
-    def fetch(self, reference: str) -> dict[str, Any] | None:
-        return self._manifest
+    def fetch(self, reference: str) -> FetchedManifest | None:
+        return FetchedManifest(self._manifest) if self._manifest is not None else None
 
 
 def _completed(
@@ -204,53 +207,61 @@ def test_grype_still_raises_scan_failure_for_other_errors(
         )
 
 
-def test_oras_manifest_fetcher_returns_manifest(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("header_digest", ["sha256:" + "a" * 64, None])
+def test_oras_manifest_fetcher_hashes_original_bytes_independently_of_header(
+    monkeypatch: pytest.MonkeyPatch, header_digest: str | None
 ) -> None:
-    class _Registry:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
+    monkeypatch.setattr(
+        "oras.auth.token.TokenAuth.load_configs", lambda *args, **kwargs: None
+    )
+    raw = json.dumps(HELM_CHART_MANIFEST, indent=2).encode() + b"\n"
+    response = requests.Response()
+    response.status_code = 200
+    response._content = raw
+    if header_digest is not None:
+        response.headers["Docker-Content-Digest"] = header_digest
 
-        def get_manifest(self, reference: str) -> dict[str, Any]:
-            assert reference == "ghcr.io/acme/chart:2.0.7"
-            return HELM_CHART_MANIFEST
+    def request(
+        _self: object, url: str, method: str, **kwargs: object
+    ) -> requests.Response:
+        assert url == "https://ghcr.io/v2/acme/chart/manifests/2.0.7"
+        assert method == "GET"
+        return response
 
-    monkeypatch.setattr("oras.provider.Registry", _Registry)
-
-    assert (
-        OrasManifestFetcher().fetch("ghcr.io/acme/chart:2.0.7") == HELM_CHART_MANIFEST
+    monkeypatch.setattr("oras.provider.Registry.do_request", request)
+    assert OrasManifestFetcher().fetch("ghcr.io/acme/chart:2.0.7") == FetchedManifest(
+        document=HELM_CHART_MANIFEST,
+        digest="sha256:" + hashlib.sha256(raw).hexdigest(),
     )
 
 
 def test_oras_manifest_fetcher_returns_none_when_registry_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _Registry:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
+    monkeypatch.setattr(
+        "oras.auth.token.TokenAuth.load_configs", lambda *args, **kwargs: None
+    )
 
-        def get_manifest(self, reference: str) -> dict[str, Any]:
-            raise ValueError("Issue retrieving manifest: not found")
+    def request(*args: object, **kwargs: object) -> requests.Response:
+        raise ValueError("Issue retrieving manifest: not found")
 
-    monkeypatch.setattr("oras.provider.Registry", _Registry)
-
+    monkeypatch.setattr("oras.provider.Registry.do_request", request)
     assert OrasManifestFetcher().fetch("ghcr.io/acme/missing:1.0.0") is None
 
 
 def test_oras_manifest_fetcher_is_bounded_by_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "oras.auth.token.TokenAuth.load_configs", lambda *args, **kwargs: None
+    )
     import time
 
-    class _SlowRegistry:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
+    def request(*args: object, **kwargs: object) -> requests.Response:
+        time.sleep(2.0)
+        return requests.Response()
 
-        def get_manifest(self, reference: str) -> dict[str, Any]:
-            time.sleep(2.0)
-            return HELM_CHART_MANIFEST
-
-    monkeypatch.setattr("oras.provider.Registry", _SlowRegistry)
+    monkeypatch.setattr("oras.provider.Registry.do_request", request)
 
     start = time.monotonic()
     result = OrasManifestFetcher(timeout_seconds=0.1).fetch("ghcr.io/acme/slow:1.0.0")

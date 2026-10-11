@@ -6,7 +6,11 @@ inputs:
     required: false
     default: "true"
   cache-grype-db:
-    description: "Cache the Grype vulnerability database and refresh it once per UTC day"
+    description: "Restore the Grype vulnerability database prepared by the default-branch warmup action"
+    required: false
+    default: "true"
+  cache-scans:
+    description: "Cache successful Vulnerability Scans; requires cache-grype-db to be enabled"
     required: false
     default: "true"
   grype-check-for-app-update:
@@ -49,7 +53,7 @@ runs:
       run: |
         version=$(grype version | awk '$1 == "Version:" {print $2}')
         test -n "$version"
-        prefix="renovate-vuln-report-grype-db-v1-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
+        prefix="renovate-vuln-report-grype-db-v2-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
         echo "key=${prefix}$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
@@ -61,35 +65,54 @@ runs:
         path: ${{ runner.temp }}/renovate-vuln-report-grype-db
         key: ${{ steps.grype-db-cache-key.outputs.key }}
         restore-keys: ${{ steps.grype-db-cache-key.outputs.prefix }}
+        fail-on-cache-miss: "true"
 
-    - name: Refresh Grype database
-      if: ${{ inputs.cache-grype-db == 'true' && steps.grype-db-cache.outputs.cache-hit != 'true' }}
+    - name: Prepare scan cache key
+      if: ${{ github.event_name == 'pull_request' && inputs.cache-scans == 'true' && inputs.cache-grype-db == 'true' }}
+      id: scan-cache-key
       shell: bash
       env:
-        GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
-        GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/renovate-vuln-report-grype-db
-      run: grype db update
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        test -n "$PR_NUMBER"
+        prefix="renovate-vuln-report-scans-v1-${RUNNER_OS}-${RUNNER_ARCH}-pr-${PR_NUMBER}-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-    - name: Save Grype database
-      if: ${{ inputs.cache-grype-db == 'true' && steps.grype-db-cache.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - name: Restore Vulnerability Scans
+      if: ${{ github.event_name == 'pull_request' && inputs.cache-scans == 'true' && inputs.cache-grype-db == 'true' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ runner.temp }}/renovate-vuln-report-grype-db
-        key: ${{ steps.grype-db-cache-key.outputs.key }}
+        path: ${{ runner.temp }}/renovate-vuln-report-scans
+        key: ${{ steps.scan-cache-key.outputs.key }}
+        restore-keys: ${{ steps.scan-cache-key.outputs.prefix }}
 
     - name: Generate Renovate vulnerability report
+      id: report
       shell: bash
       env:
         INPUTS_CACHE_GRYPE_DB: ${{ inputs.cache-grype-db }}
+        INPUTS_CACHE_SCANS: ${{ inputs.cache-scans }}
         INPUTS_FORGE_API_URL: ${{ inputs.forge-api-url }}
+        GRYPE_DB_AUTO_UPDATE: "false"
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
         FORGE_TOKEN: ${{ inputs.token }}
         RENOVATE_VULN_REPORT_SURFACE: ${{ inputs.report-surface }}
         RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}
       run: |
+        unset RENOVATE_VULN_REPORT_SCAN_CACHE_DIR
         if [[ "$INPUTS_CACHE_GRYPE_DB" == "true" ]]; then
           export GRYPE_DB_CACHE_DIR="$RUNNER_TEMP/renovate-vuln-report-grype-db"
-          export GRYPE_DB_AUTO_UPDATE=false
+          if [[ "$INPUTS_CACHE_SCANS" == "true" && "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            export RENOVATE_VULN_REPORT_SCAN_CACHE_DIR="$RUNNER_TEMP/renovate-vuln-report-scans"
+          fi
         fi
         uv run --locked --no-dev --isolated --project "$GITHUB_ACTION_PATH" \
           renovate-vuln-report --forge-api-url "${INPUTS_FORGE_API_URL}"
+
+    - name: Save Vulnerability Scans
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && inputs.cache-scans == 'true' && inputs.cache-grype-db == 'true' && steps.report.outputs.scan-cache-updated == 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/renovate-vuln-report-scans
+        key: ${{ steps.scan-cache-key.outputs.key }}

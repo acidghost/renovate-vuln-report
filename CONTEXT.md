@@ -65,6 +65,22 @@ _Avoid_: Scan Platform, host platform, architecture, Grype platform
 One assessment of one **Scan Target** for known vulnerabilities. A Vulnerability Scan may succeed or fail. Finding vulnerabilities is a successful scan outcome, not a scan failure.
 _Avoid_: Grype run, scan result
 
+**Grype Vulnerability Database**:
+The vulnerability data used by Grype to perform a **Vulnerability Scan**. A database update can change **Vulnerability Findings** even when the **Scan Target** is unchanged.
+_Avoid_: Scan cache, SBOM cache
+
+**Grype Database Cache**:
+A persisted snapshot of the **Grype Vulnerability Database**, shared with pull request runs through the consumer repository's cache service. This cache contains vulnerability data, not **Vulnerability Scan** results.
+_Avoid_: Vulnerability Scan Cache, image cache
+
+**Grype Database Cache Warmup**:
+A separate action that prepares and publishes a **Grype Database Cache** snapshot. End users run it in a scheduled workflow on the default branch of the repository using the reporting action, with an optional manual trigger for initial seeding.
+_Avoid_: PR cache refresh, scheduled scan
+
+**Vulnerability Scan Cache**:
+Persisted results from successful **Vulnerability Scans**, including scans with no **Vulnerability Findings**. These results are reused within a Renovate PR when the immutable **Scan Target**, **Scan Target Platform**, Grype version (including embedded Syft), scanner configuration, and **Grype Vulnerability Database** are unchanged. Failed scans and **Unsupported Update Entries** are not cached. This cache does not contain rendered **Vulnerability Reports** or registry credentials.
+_Avoid_: Grype Database Cache, SBOM cache, report cache
+
 **Vulnerability Finding**:
 One reported vulnerability affecting an **Affected Package** within a **Scan Target**. A Vulnerability Finding may include exploit-prioritization signals such as **EPSS** and **KEV** when available.
 _Avoid_: Vulnerability, scanner match, issue
@@ -139,3 +155,11 @@ Dev: "Should every run create a new pull request comment?"
 Domain expert: "No. Use a Managed Pull Request Comment identified by a hidden marker and update it on later runs."
 Dev: "Which platform should the first scan use for multi-platform images?"
 Domain expert: "Do not specify a Scan Target Platform in the first cut. Let the scanner use its default, and consider a user-set Scan Target Platform later."
+Dev: "Where should we warm the Grype Database Cache?"
+Domain expert: "Run the separate warming action in a scheduled workflow on the consumer repository's default branch, not in a Renovate PR or in the action's source repository."
+Dev: "Should a PR update or save the Grype Vulnerability Database?"
+Domain expert: "No. PR reporting only restores a warmed database snapshot. Only the warming action updates and publishes the database. If no compatible snapshot is available, run warmup before reporting."
+Dev: "Do Vulnerability Scan Cache entries also need to be shared across PRs?"
+Domain expert: "No. Keep scan results scoped to the PR; repeated syncs can reuse successful scans without requiring cross-PR sharing."
+Dev: "Can a PR sync reuse a scan if the image has not changed?"
+Domain expert: "Yes, provided the database, Grype version, configuration, and Scan Target Platform are also unchanged. Always publish the report, even when the scan is reused."

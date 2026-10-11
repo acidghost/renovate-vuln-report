@@ -22,7 +22,7 @@ jobs:
       - name: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-            | sh -s -- -b /usr/local/bin
+            | sh -s -- -b /usr/local/bin v0.120.1
 
       # Optional: log in before scanning private registry images.
       # - uses: docker/login-action@v4
@@ -50,9 +50,42 @@ Bring a compatible `uv` version. Disabling setup does not disable locked depende
 
 ### Grype database cache
 
-By default, the action caches the Grype vulnerability database using `actions/cache`. Cache keys include the runner OS, architecture, Grype version, and UTC date. The first run each day restores the previous snapshot if available, checks for a database update, and saves today's snapshot. Subsequent cache hits reuse it without checking for updates during scans. Update failures fail the action rather than silently using an older snapshot.
+The reporting action **only restores** the Grype vulnerability database using `actions/cache`; it never updates or saves it. Publish shared snapshots with the separate `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch** (not in this action's source repository):
 
-The refreshed database is saved before scanning, so a failed scan does not discard it. GitHub's cache scope and eviction rules apply: separate pull requests or concurrent cache misses may each need to refresh it. No scheduled job is required; refresh happens on the first run of the day.
+```yaml
+name: Warm Grype database
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grype-db-cache-warmup
+  cancel-in-progress: false
+
+jobs:
+  warm-grype-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin v0.120.1
+      - uses: acidghost/renovate-vuln-report/grype-db-cache@main
+```
+
+Commit this workflow to the default branch. Run it manually on that branch to seed the cache before the next scheduled run. The warming action requires Grype on `PATH`, refuses PR/non-default-branch runs, and needs neither `uv` nor Renovate metadata. Use the **same Grype version, runner OS/architecture, and cache backend** in warmup and PR jobs. On Forgejo/Gitea, put the workflow under `.forgejo/workflows/` or `.gitea/workflows/` and use your runner's supported label in place of `ubuntu-latest`.
+
+Both actions use the key `renovate-vuln-report-grype-db-v2-<OS>-<ARCH>-<Grype version>-<UTC date>` and the path `${{ runner.temp }}/renovate-vuln-report-grype-db`, with the same pinned cache actions. Paths and archive compression must match too: the cache service checks an opaque cache version as well as the key. The `v2` prefix deliberately leaves old PR-private database snapshots behind, since those could shadow newer shared snapshots on Forgejo.
+
+On an exact miss, warmup restores an earlier compatible snapshot if available, runs `grype db update`, and saves today's snapshot. An exact hit reuses today's immutable snapshot. Update failures fail warmup rather than silently publishing an older snapshot as current. PR reporting restores today's snapshot or an older compatible prefix match, without refreshing or saving it. Grype still validates the database's age and integrity. The database remains frozen during scan-cache lookup and scanning.
+
+On Forgejo, PR restore searches its private scope first, then the shared repository cache; non-PR warmup publishes to the shared scope. Independent runners' local caches are not automatically shared. GitHub's branch scope and cache eviction rules also apply. If no compatible warmed snapshot is available, database restore fails; seed the cache by running the warming workflow on the default branch before reporting.
 
 To disable caching (for example, on Forgejo/Gitea runners without a compatible cache service, or when using a custom database), set:
 
@@ -62,7 +95,25 @@ To disable caching (for example, on Forgejo/Gitea runners without a compatible c
     cache-grype-db: 'false'
 ```
 
-With caching disabled, Grype uses its normal database location and update behavior, including any `GRYPE_DB_*` environment overrides. The CLI is unchanged.
+With caching disabled, Grype uses its normal database location or your `GRYPE_DB_CACHE_DIR` override. You must provision a valid database separately: the reporting action always disables database auto-update, even when caching is disabled. The standalone CLI retains its normal update behavior.
+
+### Vulnerability Scan cache
+
+By default, the action also caches successful Vulnerability Scans, including scans with no findings. Updating a PR to sync with its base branch reuses these results when the scan inputs are unchanged, while still publishing the report normally.
+
+Results are keyed by the immutable image digest, Grype version (including its embedded Syft version), loaded Grype configuration, scanner environment, and a checksum of the validated vulnerability database. Tag-only targets are resolved by hashing the original manifest bytes and scanned by digest; moved tags trigger a new scan. This does not depend on the registry's `Docker-Content-Digest` header. Multi-platform images also respect Grype's configured platform and the runner architecture. Failed scans and unsupported targets are not cached. Unresolved tags, invalid cache entries, and cache I/O failures fall back to normal scanning.
+
+Scan caching requires `cache-grype-db: 'true'` so the database cannot change between cache lookup and scanning. A refreshed database invalidates previous results. Only vulnerability matches are stored, not Grype's configuration/registry credentials or rendered reports. Scan caching runs only for PR events, and archive keys include the PR number so results cannot be restored across PRs. Treat cached results as repository data: the Forge's cache visibility, scope, and eviction rules apply. New snapshots are saved only when new results are added, including successful scans from a partially failed report.
+
+To disable scan caching while retaining the database cache:
+
+```yaml
+- uses: acidghost/renovate-vuln-report@main
+  with:
+    cache-scans: 'false'
+```
+
+Disabling `cache-grype-db` also disables action-managed scan caching. On Forgejo/Gitea, both caches require a compatible cache service.
 
 ### Pull request comments for Forgejo/Gitea
 
@@ -77,7 +128,7 @@ steps:
   - name: Install Grype
     run: |
       curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-        | sh -s -- -b /usr/local/bin
+        | sh -s -- -b /usr/local/bin v0.120.1
   - uses: acidghost/renovate-vuln-report@main
     with:
       report-surface: pr-comment
@@ -131,11 +182,13 @@ Options:
 - `--report-surface summary|pr-comment` defaults to `summary`
 - `--forge github|forgejo|gitea` defaults to `github`
 - `--forge-api-url URL` defaults to `GITHUB_API_URL`, then `https://api.github.com`
+- `--scan-cache-dir PATH` enables local scan caching; requires a prepared, valid Grype database and `GRYPE_DB_AUTO_UPDATE=false`. Refresh the database with `grype db update` before running. Otherwise, scans bypass the cache.
 
 Environment variables:
 
 - `RENOVATE_VULN_REPORT_SURFACE` can set the default report surface
 - `RENOVATE_VULN_REPORT_FORGE` can set the default forge
+- `RENOVATE_VULN_REPORT_SCAN_CACHE_DIR` can set the scan cache directory; caching is disabled by default in the CLI
 - `FORGE_TOKEN` is required when `--report-surface pr-comment` is used
 - `GRYPE_CHECK_FOR_APP_UPDATE` defaults to `false` for Grype subprocesses; set it to `true` to enable Grype's startup version check when using the CLI.
 

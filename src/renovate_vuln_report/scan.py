@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
+from pathlib import Path
 from typing import Any, Protocol
 
 from renovate_vuln_report.errors import ScanFailure, UnsupportedScanTarget
 from renovate_vuln_report.model import Finding, ScanOutcome
 from renovate_vuln_report.oci import (
-    Classification,
+    FetchedManifest,
     ManifestFetcher,
     classify_manifest,
     make_default_manifest_fetcher,
 )
+from renovate_vuln_report.scan_cache import ScanCache
 
 
 class Scanner(Protocol):
@@ -20,22 +24,45 @@ class Scanner(Protocol):
 
 
 class GrypeScanner:
-    def __init__(self, manifest_fetcher: ManifestFetcher | None = None) -> None:
+    def __init__(
+        self,
+        manifest_fetcher: ManifestFetcher | None = None,
+        cache_dir: Path | None = None,
+    ) -> None:
         # When None, the production fetcher is built lazily on first scan so
         # tests can inject a double and avoid network access.
         self._manifest_fetcher = manifest_fetcher
+        self._cache = ScanCache(cache_dir) if cache_dir is not None else None
+        self.cache_updated = False
 
     def scan(self, scan_target: str) -> ScanOutcome:
-        classification = self._classify(scan_target)
-        if classification.skip_reason is not None:
-            raise UnsupportedScanTarget(
-                public_reason=classification.skip_reason,
-                detail=f"OCI manifest classified as {classification.kind}",
-            )
+        manifest = self._fetch_manifest(scan_target)
+        if manifest is not None:
+            classification = classify_manifest(manifest.document)
+            if classification.skip_reason is not None:
+                raise UnsupportedScanTarget(
+                    public_reason=classification.skip_reason,
+                    detail=f"OCI manifest classified as {classification.kind}",
+                )
 
-        command = ["grype", "-o", "json", f"registry:{scan_target}"]
         env = os.environ.copy()
         env.setdefault("GRYPE_CHECK_FOR_APP_UPDATE", "false")
+        cache_path = None
+        immutable_target = _immutable_target(scan_target, manifest)
+        if self._cache is not None and immutable_target is not None:
+            cache_path = self._cache.path_for(immutable_target, env)
+        if cache_path is not None:
+            cached = ScanCache.load(cache_path)
+            if cached is not None:
+                print(
+                    f"Reusing cached Vulnerability Scan: {scan_target}", file=sys.stderr
+                )
+                return ScanOutcome(findings=findings_from_grype_json(cached))
+
+        # Pin a resolved tag before scanning so a concurrent tag move cannot
+        # store results for different content under the resolved digest.
+        target = immutable_target if cache_path is not None else scan_target
+        command = ["grype", "-o", "json", f"registry:{target}"]
         try:
             completed = subprocess.run(
                 command,
@@ -64,17 +91,26 @@ class GrypeScanner:
 
         if not isinstance(grype_json, dict):
             raise ScanFailure("grype JSON output was not an object", completed.stdout)
+        if cache_path is not None and ScanCache.save(cache_path, grype_json):
+            self.cache_updated = True
         return ScanOutcome(findings=findings_from_grype_json(grype_json))
 
-    def _classify(self, scan_target: str) -> Classification:
+    def _fetch_manifest(self, scan_target: str) -> FetchedManifest | None:
         fetcher = self._manifest_fetcher or make_default_manifest_fetcher()
         self._manifest_fetcher = fetcher
-        manifest = fetcher.fetch(scan_target)
-        if manifest is None:
-            # Could not fetch a manifest: we cannot classify reliably, so fall
-            # through to a normal scan rather than guessing.
-            return Classification(kind="unknown", skip_reason=None)
-        return classify_manifest(manifest)
+        return fetcher.fetch(scan_target)
+
+
+def _immutable_target(target: str, manifest: FetchedManifest | None) -> str | None:
+    reference, separator, digest = target.partition("@")
+    if not separator:
+        digest = manifest.digest if manifest is not None else None
+    if not digest or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+        return None
+    # Strip a tag but preserve a registry port.
+    repository, slash, name = reference.rpartition("/")
+    name = name.partition(":")[0]
+    return f"{repository}{slash}{name}@{digest}"
 
 
 def findings_from_grype_json(document: dict[str, Any]) -> tuple[Finding, ...]:
