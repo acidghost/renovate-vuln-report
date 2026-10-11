@@ -5,5 +5,15 @@
     "local>acidghost/renovate-config:approve(minor)",
     "local>acidghost/renovate-config:approve(patch)",
     "local>acidghost/renovate-vuln-report"
+  ],
+  "packageRules": [
+    {
+      "matchDepNames": [
+        "astral-sh/uv",
+        "uv",
+        "uv_build"
+      ],
+      "groupName": "uv"
+    }
   ]
 }
