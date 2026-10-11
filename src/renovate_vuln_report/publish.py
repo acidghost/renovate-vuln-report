@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -10,6 +10,8 @@ from typing import Any, Protocol
 
 from renovate_vuln_report.errors import ForgePublishError
 from renovate_vuln_report.model import PullRequestContext
+
+logger = logging.getLogger(__name__)
 
 MANAGED_COMMENT_MARKER = "<!-- renovate-vuln-report:managed-comment:v1 -->"
 
@@ -128,23 +130,18 @@ def publish_report(
 ) -> bool:
     if report_surface == "summary":
         write_summary(summary_path, markdown)
+        logger.info("Published Vulnerability Report to Step Summary")
         return False
 
     if report_surface != "pr-comment":
-        print(f"unsupported report surface: {report_surface}", file=sys.stderr)
+        logger.error("unsupported report surface: %s", report_surface)
         return True
 
     if context is None:
-        print(
-            "cannot publish Pull Request Comment without pull request context",
-            file=sys.stderr,
-        )
+        logger.error("cannot publish Pull Request Comment without pull request context")
         return True
     if comment_client is None:
-        print(
-            "cannot publish Pull Request Comment without a Forge client",
-            file=sys.stderr,
-        )
+        logger.error("cannot publish Pull Request Comment without a Forge client")
         return True
 
     try:
@@ -155,7 +152,7 @@ def publish_report(
             markdown=markdown,
         )
     except ForgePublishError as error:
-        print(str(error), file=sys.stderr)
+        logger.error("Cannot publish Pull Request Comment: %s", error)
         return True
     return False
 
@@ -172,8 +169,16 @@ def publish_managed_pull_request_comment(
     for comment in comments:
         if comment.body.startswith(MANAGED_COMMENT_MARKER):
             comment_client.update_issue_comment(repository, comment.id, body)
+            logger.info(
+                "Updated Managed Pull Request Comment for %s#%s",
+                repository,
+                issue_number,
+            )
             return
     comment_client.create_issue_comment(repository, issue_number, body)
+    logger.info(
+        "Created Managed Pull Request Comment for %s#%s", repository, issue_number
+    )
 
 
 def write_summary(summary_path: Path | None, content: str) -> None:

@@ -17,10 +17,13 @@ falls through to a normal scan.
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 # Media types that mark a manifest as an OCI/Docker image index (multi-arch).
 IMAGE_INDEX_MEDIA_TYPES = frozenset(
@@ -189,6 +192,7 @@ def _fetch_manifest_bounded(
     import oras.defaults
     import oras.provider
 
+    logger.debug("Fetching OCI manifest for %s", reference)
     outcome: FetchedManifest | None = None
 
     def _work() -> None:
@@ -216,6 +220,9 @@ def _fetch_manifest_bounded(
         except Exception:  # noqa: BLE001 - oras raises unrelated types; fall back to the scanner.
             # Network, auth, not-found, malformed manifest, or an oras bug:
             # we cannot classify reliably, so fall back to the scanner.
+            logger.debug(
+                "OCI manifest fetch failed for %s; falling back to Grype", reference
+            )
             outcome = None
 
     worker = threading.Thread(target=_work, daemon=True)
@@ -223,6 +230,9 @@ def _fetch_manifest_bounded(
     worker.join(timeout_seconds)
     if worker.is_alive():
         # Timed out; the daemon thread is abandoned and will not block exit.
+        logger.debug(
+            "OCI manifest fetch timed out for %s; falling back to Grype", reference
+        )
         return None
     return outcome
 

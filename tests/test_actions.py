@@ -107,3 +107,11 @@ def test_warmup_requires_default_branch_non_pr_run(
     assert (result.returncode == 0) == allowed
     if not allowed:
         assert "default branch, outside a PR" in result.stderr
+
+
+def test_report_action_passes_optional_log_level_without_shell_interpolation() -> None:
+    document = yaml.safe_load(REPORT_ACTION.read_text())
+    assert document["inputs"]["log-level"]["default"] == ""
+    report = step(REPORT_ACTION, "Generate Renovate vulnerability report")
+    assert report["env"]["RENOVATE_VULN_REPORT_LOG_LEVEL"] == "${{ inputs.log-level }}"
+    assert "${{ inputs.log-level }}" not in report["run"]

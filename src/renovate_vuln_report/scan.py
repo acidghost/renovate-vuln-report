@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,6 +17,8 @@ from renovate_vuln_report.oci import (
     make_default_manifest_fetcher,
 )
 from renovate_vuln_report.scan_cache import ScanCache
+
+logger = logging.getLogger(__name__)
 
 
 class Scanner(Protocol):
@@ -39,6 +41,9 @@ class GrypeScanner:
         manifest = self._fetch_manifest(scan_target)
         if manifest is not None:
             classification = classify_manifest(manifest.document)
+            logger.debug(
+                "OCI manifest for %s classified as %s", scan_target, classification.kind
+            )
             if classification.skip_reason is not None:
                 raise UnsupportedScanTarget(
                     public_reason=classification.skip_reason,
@@ -51,18 +56,20 @@ class GrypeScanner:
         immutable_target = _immutable_target(scan_target, manifest)
         if self._cache is not None and immutable_target is not None:
             cache_path = self._cache.path_for(immutable_target, env)
+        elif self._cache is not None:
+            logger.debug("Scan cache bypassed: no immutable digest for %s", scan_target)
         if cache_path is not None:
             cached = ScanCache.load(cache_path)
             if cached is not None:
-                print(
-                    f"Reusing cached Vulnerability Scan: {scan_target}", file=sys.stderr
-                )
+                logger.info("Reusing cached Vulnerability Scan: %s", scan_target)
                 return ScanOutcome(findings=findings_from_grype_json(cached))
+            logger.debug("Scan cache miss for %s", scan_target)
 
         # Pin a resolved tag before scanning so a concurrent tag move cannot
         # store results for different content under the resolved digest.
         target = immutable_target if cache_path is not None else scan_target
         command = ["grype", "-o", "json", f"registry:{target}"]
+        logger.debug("Running Grype for %s", target)
         try:
             completed = subprocess.run(
                 command,
@@ -93,6 +100,7 @@ class GrypeScanner:
             raise ScanFailure("grype JSON output was not an object", completed.stdout)
         if cache_path is not None and ScanCache.save(cache_path, grype_json):
             self.cache_updated = True
+            logger.debug("Saved Vulnerability Scan to cache for %s", scan_target)
         return ScanOutcome(findings=findings_from_grype_json(grype_json))
 
     def _fetch_manifest(self, scan_target: str) -> FetchedManifest | None:

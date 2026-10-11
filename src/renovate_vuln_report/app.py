@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import logging
 from pathlib import Path
 
 from renovate_vuln_report.errors import RenovateVulnReportError
@@ -8,6 +8,8 @@ from renovate_vuln_report.intake import collect_update_entries, pull_request_con
 from renovate_vuln_report.publish import ForgeCommentClient, publish_report
 from renovate_vuln_report.report import build_report, render_step_summary
 from renovate_vuln_report.scan import Scanner
+
+logger = logging.getLogger(__name__)
 
 
 def run(
@@ -20,9 +22,12 @@ def run(
     comment_client: ForgeCommentClient | None = None,
 ) -> int:
     context = None
+    logger.debug("Reading pull request event from %s", event_path)
     try:
         context = pull_request_context(event_name=event_name, event_path=event_path)
+        logger.info("Processing Renovate PR %s#%s", context.repository, context.number)
         entries = collect_update_entries(context.body)
+        logger.info("Collected %d Update Entries", len(entries))
     except RenovateVulnReportError as error:
         content = f"# Image Update Vulnerability Report\n\nFailed: {error}\n"
         publish_report(
@@ -32,7 +37,7 @@ def run(
             context=context,
             comment_client=comment_client,
         )
-        print(str(error), file=sys.stderr)
+        logger.error("Cannot build Vulnerability Report: %s", error)
         return 1
 
     report = build_report(entries=entries, scanner=scanner)
@@ -44,4 +49,11 @@ def run(
         context=context,
         comment_client=comment_client,
     )
-    return 1 if report.failed or publish_failed else 0
+    exit_code = 1 if report.failed or publish_failed else 0
+    logger.info(
+        "Report complete: %d Scan Targets, %d Skipped Update Entries, exit status %d",
+        len(report.target_reports),
+        len(report.skipped_entries),
+        exit_code,
+    )
+    return exit_code

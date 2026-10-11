@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class ScanCache:
@@ -21,16 +23,14 @@ class ScanCache:
         # An auto-updating scanner could use a different DB after the lookup.
         # Without a frozen DB we must let Grype update and scan normally.
         if env.get("GRYPE_DB_AUTO_UPDATE", "").lower() != "false":
+            logger.debug("Scan cache bypassed: GRYPE_DB_AUTO_UPDATE is not false")
             return None
         if not self._prepared:
             self._prepared = True
             try:
                 self._context = self._fingerprint(env)
             except (OSError, ValueError, subprocess.SubprocessError) as error:
-                print(
-                    f"Scan cache unavailable; scanning normally: {error}",
-                    file=sys.stderr,
-                )
+                logger.warning("Scan cache unavailable; scanning normally: %s", error)
         if self._context is None:
             return None
         key = hashlib.sha256(target.encode()).hexdigest()
@@ -42,6 +42,9 @@ class ScanCache:
                 ["grype", *args], check=True, capture_output=True, text=True, env=env
             ).stdout
 
+        logger.debug(
+            "Preparing scan cache fingerprint from Grype configuration and database"
+        )
         version = output("version", "-o", "json")
         config = output("config", "--load")
         status = json.loads(output("db", "status", "-o", "json"))
@@ -93,7 +96,7 @@ class ScanCache:
             temporary.replace(path)
             return True
         except OSError as error:
-            print(f"Could not save scan cache: {error}", file=sys.stderr)
+            logger.warning("Could not save scan cache: %s", error)
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:

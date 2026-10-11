@@ -1,6 +1,10 @@
 name: Renovate Vulnerability Report
 description: Report vulnerabilities in Renovate pull request image updates
 inputs:
+  log-level:
+    description: "Action logging verbosity: debug, info, warning, error, or critical (case-insensitive); defaults to debug when RUNNER_DEBUG=1, otherwise info. Does not change Grype logging."
+    required: false
+    default: ""
   setup-uv:
     description: "Install uv; set to false to use uv already available on PATH"
     required: false
@@ -97,6 +101,7 @@ runs:
         GRYPE_DB_AUTO_UPDATE: "false"
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
         FORGE_TOKEN: ${{ inputs.token }}
+        RENOVATE_VULN_REPORT_LOG_LEVEL: ${{ inputs.log-level }}
         RENOVATE_VULN_REPORT_SURFACE: ${{ inputs.report-surface }}
         RENOVATE_VULN_REPORT_FORGE: ${{ inputs.forge }}
       run: |

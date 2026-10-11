@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
-import sys
 from pathlib import Path
 
 from renovate_vuln_report.app import run
 from renovate_vuln_report.publish import HttpForgeCommentClient
 from renovate_vuln_report.scan import GrypeScanner
+
+logger = logging.getLogger(__name__)
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+def _log_level(value: str) -> str:
+    level = value.upper()
+    if level not in LOG_LEVELS:
+        raise argparse.ArgumentTypeError(
+            f"invalid log level: {value!r}; choose from {', '.join(LOG_LEVELS).lower()}"
+        )
+    return level
 
 
 def main() -> None:
@@ -32,23 +44,35 @@ def main() -> None:
         default=os.environ.get("RENOVATE_VULN_REPORT_SCAN_CACHE_DIR"),
         help="Cache successful scans (requires GRYPE_DB_AUTO_UPDATE=false)",
     )
+    parser.add_argument(
+        "--log-level",
+        type=_log_level,
+        choices=LOG_LEVELS,
+        default=os.environ.get("RENOVATE_VULN_REPORT_LOG_LEVEL")
+        or ("debug" if os.environ.get("RUNNER_DEBUG") == "1" else "info"),
+        help="Logging verbosity (default: debug when RUNNER_DEBUG=1, otherwise info; case-insensitive)",
+    )
     args = parser.parse_args()
+
+    # Keep dependency loggers at warning: registry HTTP debug logs can expose
+    # credentials. Only our package follows the user's verbosity setting.
+    logging.basicConfig(
+        level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s"
+    )
+    logging.getLogger("renovate_vuln_report").setLevel(args.log_level)
 
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     event_path_value = os.environ.get("GITHUB_EVENT_PATH")
     summary_path_value = os.environ.get("GITHUB_STEP_SUMMARY")
     if not event_path_value:
-        print("GITHUB_EVENT_PATH is not set", file=sys.stderr)
+        logger.error("GITHUB_EVENT_PATH is not set")
         raise SystemExit(1)
 
     comment_client = None
     if args.report_surface == "pr-comment":
         token = os.environ.get("FORGE_TOKEN")
         if not token:
-            print(
-                "FORGE_TOKEN is required when report-surface is pr-comment",
-                file=sys.stderr,
-            )
+            logger.error("FORGE_TOKEN is required when report-surface is pr-comment")
             raise SystemExit(1)
         comment_client = HttpForgeCommentClient(
             forge=args.forge, api_url=args.forge_api_url, token=token

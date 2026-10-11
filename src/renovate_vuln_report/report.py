@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import logging
 
 from renovate_vuln_report.errors import ScanFailure, UnsupportedScanTarget
 from renovate_vuln_report.model import (
@@ -14,6 +14,8 @@ from renovate_vuln_report.model import (
 )
 from renovate_vuln_report.scan import Scanner
 
+logger = logging.getLogger(__name__)
+
 SEVERITY_ORDER = {
     "critical": 0,
     "high": 1,
@@ -25,10 +27,20 @@ SEVERITY_ORDER = {
 
 
 def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Report:
-    image_entries = [entry for entry in entries if isinstance(entry, ImageUpdateEntry)]
-    skipped_entries = [
-        entry for entry in entries if isinstance(entry, UnsupportedUpdateEntry)
-    ]
+    image_entries = []
+    skipped_entries = []
+    for entry in entries:
+        match entry:
+            case ImageUpdateEntry():
+                image_entries.append(entry)
+            case UnsupportedUpdateEntry():
+                skipped_entries.append(entry)
+                logger.info(
+                    "Skipped Update Entry %s: %s",
+                    entry.package_name or entry.dep_name or "<unknown>",
+                    entry.reason,
+                )
+
     target_counts: dict[str, int] = {}
     for entry in image_entries:
         target_counts[entry.new_revision.reference] = (
@@ -38,10 +50,11 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
     target_reports: list[TargetReport] = []
     failed = False
     for scan_target, update_entry_count in target_counts.items():
+        logger.info("Scanning Scan Target: %s", scan_target)
         try:
             outcome = scanner.scan(scan_target)
         except UnsupportedScanTarget as error:
-            print(f"skipped {scan_target}: {error.public_reason}", file=sys.stderr)
+            logger.info("Skipped Scan Target %s: %s", scan_target, error.public_reason)
             skipped_entries.append(
                 UnsupportedUpdateEntry(
                     reason=error.public_reason,
@@ -52,7 +65,11 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
             continue
         except ScanFailure as error:
             failed = True
-            print(error.detail, file=sys.stderr)
+            logger.error(
+                "Vulnerability Scan failed for %s: %s",
+                scan_target,
+                error.detail or error.public_reason,
+            )
             target_reports.append(
                 TargetReport(
                     scan_target=scan_target,
@@ -63,7 +80,7 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
         except Exception as error:  # noqa: BLE001 - defensive boundary around scanner plugins.
             # pragma: no cover
             failed = True
-            print(str(error), file=sys.stderr)
+            logger.error("Scanner failed unexpectedly for %s: %s", scan_target, error)
             target_reports.append(
                 TargetReport(
                     scan_target=scan_target,
@@ -72,6 +89,11 @@ def build_report(*, entries: tuple[UpdateEntry, ...], scanner: Scanner) -> Repor
                 )
             )
         else:
+            logger.info(
+                "Vulnerability Scan complete for %s: %d Vulnerability Findings",
+                scan_target,
+                len(outcome.findings),
+            )
             target_reports.append(
                 TargetReport(
                     scan_target=scan_target,

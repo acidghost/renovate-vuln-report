@@ -48,6 +48,26 @@ To use `uv` already available on `PATH` (for example, on a self-hosted runner or
 
 Bring a compatible `uv` version. Disabling setup does not disable locked dependency installation.
 
+### Logging
+
+The action logs progress to stderr at `info` level by default, or `debug` when
+workflow debug logging is enabled (`RUNNER_DEBUG=1`). An explicit `log-level`
+overrides this automatic choice. Set `log-level` to `debug` for manifest
+classification and scan-cache diagnostics, or `warning` to hide routine progress:
+
+```yaml
+- uses: acidghost/renovate-vuln-report@main
+  with:
+    log-level: debug
+```
+
+Supported levels are `debug`, `info`, `warning`, `error`, and `critical`
+(case-insensitive). This controls the reporting application's logs, not Grype,
+third-party debug logging, or other workflow steps. Reports and exit status are
+unchanged by the logging level. Debug diagnostics do not dump event payloads,
+loaded registry configuration, or successful Grype JSON output. Scan failures
+still log scanner error details.
+
 ### Grype database cache
 
 The reporting action **only restores** the Grype vulnerability database using `actions/cache`; it never updates or saves it. Publish shared snapshots with the separate `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch** (not in this action's source repository):
@@ -179,6 +199,7 @@ The CLI expects actions environment variables:
 
 Options:
 
+- `--log-level debug|info|warning|error|critical` defaults to `debug` when `RUNNER_DEBUG=1`, otherwise `info` (case-insensitive)
 - `--report-surface summary|pr-comment` defaults to `summary`
 - `--forge github|forgejo|gitea` defaults to `github`
 - `--forge-api-url URL` defaults to `GITHUB_API_URL`, then `https://api.github.com`
@@ -186,6 +207,7 @@ Options:
 
 Environment variables:
 
+- `RENOVATE_VULN_REPORT_LOG_LEVEL` sets the default log level; a nonempty value overrides `RUNNER_DEBUG`, and `--log-level` takes precedence
 - `RENOVATE_VULN_REPORT_SURFACE` can set the default report surface
 - `RENOVATE_VULN_REPORT_FORGE` can set the default forge
 - `RENOVATE_VULN_REPORT_SCAN_CACHE_DIR` can set the scan cache directory; caching is disabled by default in the CLI
