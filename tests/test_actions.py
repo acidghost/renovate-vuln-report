@@ -94,7 +94,12 @@ def test_database_cache_contract_matches_between_actions(
         ("workflow_dispatch", "refs/heads/feature", "main", False),
         ("pull_request", "refs/pull/17/merge", "main", False),
         ("pull_request_target", "refs/heads/main", "main", False),
-        ("schedule", "refs/heads/main", "", False),
+        ("schedule", "refs/heads/main", "", True),
+        ("schedule", "refs/heads/releases/stable", "", True),
+        ("workflow_dispatch", "refs/heads/main", "", False),
+        ("push", "refs/heads/main", "", False),
+        ("workflow_dispatch", "refs/tags/main", "main", False),
+        ("pull_request_target", "refs/heads/main", "", False),
     ],
 )
 def test_warmup_requires_default_branch_non_pr_run(
