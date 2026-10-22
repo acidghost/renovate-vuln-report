@@ -23,8 +23,11 @@ dev = [
 renovate-vuln-report = "renovate_vuln_report.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.13.0,<0.14.0"]
+requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv]
 exclude-newer = "1 week"
+# Temporary eMudhra security exception, bounded to the reviewed certifi release.
+# Remove after 2026-10-28, when that release clears the one-week delay.
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
