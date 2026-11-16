@@ -25,7 +25,7 @@ runs:
 
     - name: Prepare Grype database cache key
       id: grype-db-cache-key
-      shell: sh
+      shell: bash
       env:
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
       run: python3 "$GITHUB_ACTION_PATH/cache_key.py"
