@@ -29,9 +29,12 @@ runs:
       env:
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
       run: |
-        version=$(grype version | awk '$1 == "Version:" {print $2}')
-        test -n "$version"
-        prefix="renovate-vuln-report-grype-db-v2-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
+        schema=$(grype version | awk '$1 == "Supported" && $2 == "DB" && $3 == "Schema:" {print $4}')
+        if [[ ! "$schema" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Cannot determine Grype's supported database schema from grype version." >&2
+          exit 1
+        fi
+        prefix="renovate-vuln-report-grype-db-v3-${RUNNER_OS}-${RUNNER_ARCH}-schema-${schema}-"
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
         echo "key=${prefix}$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
