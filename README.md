@@ -36,7 +36,7 @@ jobs:
 
 By default, the action writes an Image Update Vulnerability Report to the actions Step Summary.
 
-The action installs a pinned version of `uv` using `astral-sh/setup-uv` and runs with its own `uv.lock` (`--locked --no-dev`) in an isolated environment. It does not install into your project's environment. Python is downloaded by `uv` if needed; Grype must still be installed separately.
+The action installs a pinned version of `uv` using `astral-sh/setup-uv` and runs with its own `uv.lock` (`--locked --no-dev`) in an isolated environment. It does not install into your project's environment. Python for the reporting application is downloaded by `uv` if needed. Database cache steps use an existing Python 3.11+ available as `python3` on `PATH`; Grype must also be installed separately.
 
 To use `uv` already available on `PATH` (for example, on a self-hosted runner or installed by an earlier step), disable setup:
 
@@ -70,7 +70,7 @@ still log scanner error details.
 
 ### Grype database cache
 
-The reporting action **only restores** the Grype vulnerability database using `actions/cache`; it never updates or saves it. Publish shared snapshots with the separate `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch** (not in this action's source repository):
+Publish shared Grype database snapshots with the `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch**, not in this action's source repository. Both actions require Grype and Python 3.11+ (as `python3`) on `PATH`; neither installs them:
 
 ```yaml
 name: Warm Grype database
@@ -99,15 +99,20 @@ jobs:
       - uses: acidghost/renovate-vuln-report/grype-db-cache@main
 ```
 
-Commit this workflow to the default branch. Run it manually on that branch to seed the cache before the next scheduled run. The warming action requires Grype on `PATH`, refuses PR/non-default-branch runs, and needs neither `uv` nor Renovate metadata. Use the **same Grype version, runner OS/architecture, and cache backend** in warmup and PR jobs. On Forgejo/Gitea, put the workflow under `.forgejo/workflows/` or `.gitea/workflows/` and use your runner's supported label in place of `ubuntu-latest`.
+Commit this workflow to the default branch and optionally run it manually to seed the cache. Warmup needs neither `uv` nor Renovate metadata. On Forgejo/Gitea, put the workflow under `.forgejo/workflows/` or `.gitea/workflows/` and use your runner's supported label in place of `ubuntu-latest`.
 
 On GitHub, scheduled runs rely on the [platform's default-branch guarantee](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule), so they do not require `github.event.repository.default_branch`. Manual and other non-scheduled runs still require that field to match the run's branch; PR runs are rejected.
 
-Both actions use the key `renovate-vuln-report-grype-db-v2-<OS>-<ARCH>-<Grype version>-<UTC date>` and the path `${{ runner.temp }}/renovate-vuln-report-grype-db`, with the same pinned cache actions. Paths and archive compression must match too: the cache service checks an opaque cache version as well as the key. The `v2` prefix deliberately leaves old PR-private database snapshots behind, since those could shadow newer shared snapshots on Forgejo.
+Both actions use the key `renovate-vuln-report-grype-db-v3-<OS>-<ARCH>-schema-<schema>-<UTC date>` and path `${{ runner.temp }}/renovate-vuln-report-grype-db`, with the same pinned cache actions. The schema comes from `supportedDbSchema` in `grype version --output json`; an unavailable or invalid schema fails setup. Sharing requires matching schema, runner OS/architecture, cache backend, archive path, and compression: the cache service checks an opaque cache version as well as the key. The `v3` namespace leaves earlier version-keyed and PR-private snapshots behind.
 
-On an exact miss, warmup restores an earlier compatible snapshot if available, runs `grype db update`, and saves today's snapshot. An exact hit reuses today's immutable snapshot. Update failures fail warmup rather than silently publishing an older snapshot as current. PR reporting restores today's snapshot or an older compatible prefix match, without refreshing or saving it. Grype still validates the database's age and integrity. The database remains frozen during scan-cache lookup and scanning.
+- **Warmup:** reuses today's exact hit. Otherwise, it restores an older compatible snapshot if available, runs `grype db update`, and saves today's snapshot. Update failures fail warmup.
+- **Reporting:** restores today's snapshot or an older schema-compatible prefix match without refreshing it. Only a complete miss triggers a network download into a **job-local database**; download failures fail the job. Reporting never saves database snapshots.
 
-On Forgejo, PR restore searches its private scope first, then the shared repository cache; non-PR warmup publishes to the shared scope. Independent runners' local caches are not automatically shared. GitHub's branch scope and cache eviction rules also apply. If no compatible warmed snapshot is available, database restore fails; seed the cache by running the warming workflow on the default branch before reporting.
+The database is prepared before scan-cache lookup and scanning, then frozen with auto-update disabled. Grype validates age and integrity; stale or corrupt restored snapshots are not silently refreshed. Schema-changing PRs download locally until default-branch warmup uses the merged Grype version. Rebase older PRs before their old-schema snapshots become stale.
+
+A metadata preflight skips Grype/database and scan-cache setup when there are no supported Image Update Entries (such as a Grype-only mise update), while still publishing Skipped Update Entries. Invalid or missing metadata still fails reporting. Preflight does not fetch manifests; non-image OCI artifacts are classified later.
+
+On Forgejo, PR restore searches its private scope first, then the shared repository cache; non-PR warmup publishes to the shared scope. Independent runners' local caches are not automatically shared. GitHub's branch scope and cache eviction rules also apply.
 
 To disable caching (for example, on Forgejo/Gitea runners without a compatible cache service, or when using a custom database), set:
 
@@ -117,7 +122,7 @@ To disable caching (for example, on Forgejo/Gitea runners without a compatible c
     cache-grype-db: 'false'
 ```
 
-With caching disabled, Grype uses its normal database location or your `GRYPE_DB_CACHE_DIR` override. You must provision a valid database separately: the reporting action always disables database auto-update, even when caching is disabled. The standalone CLI retains its normal update behavior.
+With caching disabled, Grype uses its normal database location or your `GRYPE_DB_CACHE_DIR` override, and the cache-miss download fallback is disabled too. You must provision a valid database separately: the reporting action always disables database auto-update, even when caching is disabled. The standalone CLI retains its normal update behavior.
 
 ### Vulnerability Scan cache
 
@@ -206,6 +211,7 @@ Options:
 - `--forge github|forgejo|gitea` defaults to `github`
 - `--forge-api-url URL` defaults to `GITHUB_API_URL`, then `https://api.github.com`
 - `--scan-cache-dir PATH` enables local scan caching; requires a prepared, valid Grype database and `GRYPE_DB_AUTO_UPDATE=false`. Refresh the database with `grype db update` before running. Otherwise, scans bypass the cache.
+- `--preflight` is used by the action to append `needs-scanning=true|false` to `GITHUB_OUTPUT` without invoking Grype or publishing. It defers invalid metadata to the subsequent normal reporting run, which publishes the error and fails.
 
 Environment variables:
 

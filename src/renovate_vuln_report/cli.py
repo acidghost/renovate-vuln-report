@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 
 from renovate_vuln_report.app import run
+from renovate_vuln_report.errors import RenovateVulnReportError
+from renovate_vuln_report.intake import collect_update_entries, pull_request_context
+from renovate_vuln_report.model import ImageUpdateEntry
 from renovate_vuln_report.publish import HttpForgeCommentClient
 from renovate_vuln_report.scan import GrypeScanner
 
@@ -24,6 +27,11 @@ def _log_level(value: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Write needs-scanning to GITHUB_OUTPUT without scanning or publishing",
+    )
     parser.add_argument(
         "--report-surface",
         choices=("summary", "pr-comment"),
@@ -67,6 +75,27 @@ def main() -> None:
     if not event_path_value:
         logger.error("GITHUB_EVENT_PATH is not set")
         raise SystemExit(1)
+
+    if args.preflight:
+        # Let the normal report run publish intake failures rather than failing
+        # in database/cache setup before a report can be produced.
+        needs_scanning = False
+        try:
+            context = pull_request_context(
+                event_name=event_name, event_path=Path(event_path_value)
+            )
+            entries = collect_update_entries(context.body)
+            needs_scanning = any(
+                isinstance(entry, ImageUpdateEntry) for entry in entries
+            )
+        except RenovateVulnReportError:
+            logger.debug("Preflight deferred an intake failure to the reporting step")
+        output_path = os.environ.get("GITHUB_OUTPUT")
+        if output_path:
+            with Path(output_path).open("a") as output:
+                output.write(f"needs-scanning={str(needs_scanning).lower()}\n")
+        logger.info("Supported image updates require scanning: %s", needs_scanning)
+        raise SystemExit(0)
 
     comment_client = None
     if args.report_surface == "pr-comment":

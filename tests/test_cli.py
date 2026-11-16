@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -68,3 +71,86 @@ def test_cli_rejects_invalid_log_level(
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ("payloads", "needs_scanning"),
+    [
+        ([{"datasource": "github-releases", "depName": "anchore/grype"}], False),
+        ([{"datasource": "docker", "depName": "alpine", "newValue": "3.23"}], True),
+        ([{"datasource": "docker", "depName": "alpine"}], False),
+        ([{"datasource": "docker", "newValue": "3.23"}], False),
+        (
+            [
+                {"datasource": "github-releases"},
+                {
+                    "datasource": "docker",
+                    "depName": "alpine",
+                    "newDigest": "sha256:abc",
+                },
+            ],
+            True,
+        ),
+    ],
+)
+def test_preflight_checks_metadata_without_grype_or_publishing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    note: Callable[[dict[str, object]], str],
+    pull_request_event: Callable[[str], dict[str, object]],
+    payloads: list[dict[str, object]],
+    needs_scanning: bool,
+) -> None:
+    event = tmp_path / "event.json"
+    event.write_text(
+        json.dumps(pull_request_event("\n".join(note(payload) for payload in payloads)))
+    )
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    monkeypatch.setattr(
+        "sys.argv",
+        ["renovate-vuln-report", "--preflight", "--report-surface", "pr-comment"],
+    )
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.delenv("FORGE_TOKEN", raising=False)
+    monkeypatch.setenv("PATH", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 0
+    assert output.read_text() == f"needs-scanning={str(needs_scanning).lower()}\n"
+    assert not summary.exists()
+
+
+@pytest.mark.parametrize("body", ["<!-- renovate:metadata=bad -->", "not metadata"])
+def test_preflight_defers_metadata_errors_to_normal_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pull_request_event: Callable[[str], dict[str, object]],
+    body: str,
+) -> None:
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps(pull_request_event(body)))
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    monkeypatch.setattr("sys.argv", ["renovate-vuln-report", "--preflight"])
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("RENOVATE_VULN_REPORT_SURFACE", "summary")
+    monkeypatch.setenv("PATH", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 0
+    assert output.read_text() == "needs-scanning=false\n"
+
+    monkeypatch.setattr("sys.argv", ["renovate-vuln-report"])
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 1
+    assert "Failed:" in summary.read_text()

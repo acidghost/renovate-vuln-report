@@ -70,7 +70,7 @@ The vulnerability data used by Grype to perform a **Vulnerability Scan**. A data
 _Avoid_: Scan cache, SBOM cache
 
 **Grype Database Cache**:
-A persisted snapshot of the **Grype Vulnerability Database**, shared with pull request runs through the consumer repository's cache service. This cache contains vulnerability data, not **Vulnerability Scan** results.
+A persisted snapshot of the **Grype Vulnerability Database**, shared with pull request runs through the consumer repository's cache service. Snapshots are keyed by Grype's supported database schema rather than its application version. This cache contains vulnerability data, not **Vulnerability Scan** results.
 _Avoid_: Vulnerability Scan Cache, image cache
 
 **Grype Database Cache Warmup**:
@@ -158,7 +158,9 @@ Domain expert: "Do not specify a Scan Target Platform in the first cut. Let the 
 Dev: "Where should we warm the Grype Database Cache?"
 Domain expert: "Run the separate warming action in a scheduled workflow on the consumer repository's default branch, not in a Renovate PR or in the action's source repository."
 Dev: "Should a PR update or save the Grype Vulnerability Database?"
-Domain expert: "No. PR reporting only restores a warmed database snapshot. Only the warming action updates and publishes the database. If no compatible snapshot is available, run warmup before reporting."
+Domain expert: "PR reporting restores a schema-compatible warmed snapshot without refreshing it. If no snapshot is restored, it downloads a job-local database before scan-cache lookup and scanning, then keeps it frozen. Only the warming action publishes shared database snapshots; PR reporting never saves them. With database caching disabled, the consumer must provision the database separately."
+Dev: "Does a Grype-only update need a database?"
+Domain expert: "No. Reporting checks Renovate metadata first. If there are no supported Image Update Entries, it skips database and scan-cache setup but still publishes the report. Invalid metadata still fails reporting."
 Dev: "Do Vulnerability Scan Cache entries also need to be shared across PRs?"
 Domain expert: "No. Keep scan results scoped to the PR; repeated syncs can reuse successful scans without requiring cross-PR sharing."
 Dev: "Can a PR sync reuse a scan if the image has not changed?"

@@ -28,12 +28,7 @@ runs:
       shell: bash
       env:
         GRYPE_CHECK_FOR_APP_UPDATE: ${{ inputs.grype-check-for-app-update }}
-      run: |
-        version=$(grype version | awk '$1 == "Version:" {print $2}')
-        test -n "$version"
-        prefix="renovate-vuln-report-grype-db-v2-${RUNNER_OS}-${RUNNER_ARCH}-${version}-"
-        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
-        echo "key=${prefix}$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      run: python3 "$GITHUB_ACTION_PATH/cache_key.py"
 
     - name: Restore Grype database
       id: grype-db-cache
