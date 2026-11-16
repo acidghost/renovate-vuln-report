@@ -36,7 +36,7 @@ jobs:
 
 By default, the action writes an Image Update Vulnerability Report to the actions Step Summary.
 
-The action installs a pinned version of `uv` using `astral-sh/setup-uv` and runs with its own `uv.lock` (`--locked --no-dev`) in an isolated environment. It does not install into your project's environment. Python is downloaded by `uv` if needed; Grype must still be installed separately.
+The action installs a pinned version of `uv` using `astral-sh/setup-uv` and runs with its own `uv.lock` (`--locked --no-dev`) in an isolated environment. It does not install into your project's environment. Python for the reporting application is downloaded by `uv` if needed. Database cache steps use an existing Python 3.11+ available as `python` on `PATH`; Grype must also be installed separately.
 
 To use `uv` already available on `PATH` (for example, on a self-hosted runner or installed by an earlier step), disable setup:
 
@@ -70,7 +70,7 @@ still log scanner error details.
 
 ### Grype database cache
 
-Publish shared Grype database snapshots with the `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch**, not in this action's source repository. Both actions require Grype and `jq` on `PATH`; neither installs them:
+Publish shared Grype database snapshots with the `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch**, not in this action's source repository. Both actions require Grype and Python 3.11+ (as `python`) on `PATH`; neither installs them:
 
 ```yaml
 name: Warm Grype database

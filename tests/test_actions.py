@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_ACTION = ROOT / "action.yml"
 WARMUP_ACTION = ROOT / "grype-db-cache" / "action.yml"
+CACHE_KEY_SCRIPT = ROOT / "grype-db-cache" / "cache_key.py"
 
 
 def step(action: Path, name: str) -> dict[str, Any]:
@@ -51,7 +54,6 @@ case "$*" in
   *) exit 1 ;;
 esac
 """,
-        "date": "#!/bin/sh\n[ \"$*\" = '-u +%Y-%m-%d' ] || exit 1\necho 2026-10-18\n",
     }
     for name, content in scripts.items():
         executable = bin_dir / name
@@ -69,23 +71,30 @@ esac
 def test_database_cache_contract_matches_between_actions(
     tmp_path: Path, commands: dict[str, str]
 ) -> None:
-    outputs = []
+    prefix = "renovate-vuln-report-grype-db-v3-Linux-X64-schema-6-"
     for index, action in enumerate((REPORT_ACTION, WARMUP_ACTION)):
         output = tmp_path / f"{index}.output"
-        result = shell(
-            step(action, "Prepare Grype database cache key")["run"],
-            commands | {"GITHUB_OUTPUT": str(output)},
+        prepare = step(action, "Prepare Grype database cache key")
+        assert prepare["shell"] == "python"
+        before = datetime.now(UTC).date().isoformat()
+        result = subprocess.run(
+            [sys.executable, "-c", prepare["run"]],
+            env=os.environ
+            | commands
+            | {
+                "GITHUB_ACTION_PATH": str(action.parent),
+                "GITHUB_OUTPUT": str(output),
+            },
+            cwd=tmp_path,  # The consumer checkout is not the action directory.
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        after = datetime.now(UTC).date().isoformat()
         assert result.returncode == 0, result.stderr
-        outputs.append(output.read_text())
-    assert (
-        outputs[0]
-        == outputs[1]
-        == (
-            "prefix=renovate-vuln-report-grype-db-v3-Linux-X64-schema-6-\n"
-            "key=renovate-vuln-report-grype-db-v3-Linux-X64-schema-6-2026-10-18\n"
-        )
-    )
+        lines = output.read_text().splitlines()
+        assert lines[0] == f"prefix={prefix}"
+        assert lines[1] in {f"key={prefix}{date}" for date in (before, after)}
     report_restore = step(REPORT_ACTION, "Restore Grype database")
     warm_restore = step(WARMUP_ACTION, "Restore Grype database")
     for field in ("path", "key", "restore-keys"):
@@ -134,42 +143,53 @@ def test_report_action_passes_optional_log_level_without_shell_interpolation() -
     assert "${{ inputs.log-level }}" not in report["run"]
 
 
-@pytest.mark.parametrize("action", [REPORT_ACTION, WARMUP_ACTION])
 def test_database_key_uses_schema_not_scanner_version(
-    action: Path, tmp_path: Path, commands: dict[str, str]
+    tmp_path: Path, commands: dict[str, str]
 ) -> None:
     outputs = []
     for index, (version, schema) in enumerate(
         [("0.120.1", "6"), ("0.121.2", "6"), ("0.200.0", "7")]
     ):
         output = tmp_path / f"{index}.output"
-        result = shell(
-            step(action, "Prepare Grype database cache key")["run"],
-            commands
+        result = subprocess.run(
+            [sys.executable, str(CACHE_KEY_SCRIPT)],
+            env=os.environ
+            | commands
             | {
                 "GITHUB_OUTPUT": str(output),
                 "FAKE_GRYPE_VERSION": version,
                 "FAKE_GRYPE_SCHEMA": schema,
             },
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
-        outputs.append(output.read_text())
+        outputs.append(output.read_text().splitlines()[0])
     assert outputs[0] == outputs[1]
     assert outputs[0] != outputs[2]
     assert "schema-7-" in outputs[2]
 
 
-@pytest.mark.parametrize("action", [REPORT_ACTION, WARMUP_ACTION])
-@pytest.mark.parametrize("schema", ["null", '"unknown"', "0"])
+@pytest.mark.parametrize("schema", ["null", '"unknown"', "0", "true", "6.5"])
 def test_database_key_rejects_unknown_schema(
-    action: Path, schema: str, tmp_path: Path, commands: dict[str, str]
+    schema: str, tmp_path: Path, commands: dict[str, str]
 ) -> None:
     output = tmp_path / "output"
-    result = shell(
-        step(action, "Prepare Grype database cache key")["run"],
-        commands | {"GITHUB_OUTPUT": str(output), "FAKE_GRYPE_SCHEMA": schema},
+    result = subprocess.run(
+        [sys.executable, str(CACHE_KEY_SCRIPT)],
+        env=os.environ
+        | commands
+        | {
+            "GITHUB_OUTPUT": str(output),
+            "FAKE_GRYPE_SCHEMA": schema,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode != 0
+    assert "positive integer database schema" in result.stderr
     assert not output.exists()
 
 
