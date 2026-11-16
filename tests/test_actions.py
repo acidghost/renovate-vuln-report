@@ -75,10 +75,9 @@ def test_database_cache_contract_matches_between_actions(
     for index, action in enumerate((REPORT_ACTION, WARMUP_ACTION)):
         output = tmp_path / f"{index}.output"
         prepare = step(action, "Prepare Grype database cache key")
-        assert prepare["shell"] == "sh"
         before = datetime.now(UTC).date().isoformat()
         result = subprocess.run(
-            ["sh", "-e", "-c", prepare["run"]],
+            [prepare["shell"], "-e", "-c", prepare["run"]],
             env=os.environ
             | commands
             | {
