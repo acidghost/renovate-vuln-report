@@ -41,8 +41,8 @@ def commands(tmp_path: Path) -> dict[str, str]:
     scripts = {
         "grype": """#!/bin/sh
 case "$*" in
-  version)
-    printf 'Version: %s\\nSupported DB Schema: %s\\n' "$FAKE_GRYPE_VERSION" "$FAKE_GRYPE_SCHEMA"
+  'version --output json')
+    printf '{"version":"%s","supportedDbSchema":%s}\\n' "$FAKE_GRYPE_VERSION" "$FAKE_GRYPE_SCHEMA"
     ;;
   'db update')
     printf '%s\\n' "$GRYPE_DB_CACHE_DIR" >> "$GRYPE_UPDATE_LOG"
@@ -160,7 +160,7 @@ def test_database_key_uses_schema_not_scanner_version(
 
 
 @pytest.mark.parametrize("action", [REPORT_ACTION, WARMUP_ACTION])
-@pytest.mark.parametrize("schema", ["", "unknown", "0"])
+@pytest.mark.parametrize("schema", ["null", '"unknown"', "0"])
 def test_database_key_rejects_unknown_schema(
     action: Path, schema: str, tmp_path: Path, commands: dict[str, str]
 ) -> None:

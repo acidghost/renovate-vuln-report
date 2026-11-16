@@ -70,7 +70,7 @@ still log scanner error details.
 
 ### Grype database cache
 
-Publish shared Grype database snapshots with the `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch**, not in this action's source repository. Both actions use Grype on `PATH`; neither installs it:
+Publish shared Grype database snapshots with the `grype-db-cache` action in a scheduled workflow on the **consumer repository's default branch**, not in this action's source repository. Both actions require Grype and `jq` on `PATH`; neither installs them:
 
 ```yaml
 name: Warm Grype database
@@ -103,7 +103,7 @@ Commit this workflow to the default branch and optionally run it manually to see
 
 On GitHub, scheduled runs rely on the [platform's default-branch guarantee](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule), so they do not require `github.event.repository.default_branch`. Manual and other non-scheduled runs still require that field to match the run's branch; PR runs are rejected.
 
-Both actions use the key `renovate-vuln-report-grype-db-v3-<OS>-<ARCH>-schema-<schema>-<UTC date>` and path `${{ runner.temp }}/renovate-vuln-report-grype-db`, with the same pinned cache actions. The schema comes from `Supported DB Schema` in `grype version`; an unavailable or invalid schema fails setup. Sharing requires matching schema, runner OS/architecture, cache backend, archive path, and compression: the cache service checks an opaque cache version as well as the key. The `v3` namespace leaves earlier version-keyed and PR-private snapshots behind.
+Both actions use the key `renovate-vuln-report-grype-db-v3-<OS>-<ARCH>-schema-<schema>-<UTC date>` and path `${{ runner.temp }}/renovate-vuln-report-grype-db`, with the same pinned cache actions. The schema comes from `supportedDbSchema` in `grype version --output json`; an unavailable or invalid schema fails setup. Sharing requires matching schema, runner OS/architecture, cache backend, archive path, and compression: the cache service checks an opaque cache version as well as the key. The `v3` namespace leaves earlier version-keyed and PR-private snapshots behind.
 
 - **Warmup:** reuses today's exact hit. Otherwise, it restores an older compatible snapshot if available, runs `grype db update`, and saves today's snapshot. Update failures fail warmup.
 - **Reporting:** restores today's snapshot or an older schema-compatible prefix match without refreshing it. Only a complete miss triggers a network download into a **job-local database**; download failures fail the job. Reporting never saves database snapshots.
